@@ -52,7 +52,7 @@
 
 ## Steps
 
-- [ ] **1. Spike: official feeds and recorder** (blocked by: none; target 2026-10-20; recorder runs until step 12 is done)
+- [x] **1. Spike: official feeds and recorder** (blocked by: none; target 2026-10-20; recorder runs until step 12 is done)
   - Scope: fetch and parse one live sample each from PAGASA CAP, NWS alerts, MeteoAlarm, JMA XML, BoM, BMKG, CWA; record format, area model, storm/marine event and level fields, licence, auth, and whether historical CAP archives exist. Recorder in this repo (`recorder/`, plain Python, no app dependencies) run by a systemd timer on the VM every 30 minutes, writing one file per fetch with `source`, `url`, `fetched_at`, `http_status`, raw body (non-200 kept) to a directory outside any demo DB.
   - Consumers: replay in step 7 reads the recorder's files.
   - Must not change: the fallback stack.
@@ -169,7 +169,7 @@ States: not started / in progress / code done, acceptance pending / done.
 
 | Step | State | Acceptance run | Acceptance not run and why | commit |
 |---|---|---|---|---|
-| 1 Feeds spike and recorder | code done, acceptance pending | feeds matrix: 7 sources (9 feeds) fetched and parsed 2026-10-18; recorder unit tests 9/9, mutation (drop `http_status` from required fields) fails a test; first VM run 9/9 sources 200 | ≥4 consecutive fetches: timer started 2026-10-18 17:52 UTC, 4th run due 19:00 UTC | |
+| 1 Feeds spike and recorder | done | feeds matrix: 7 sources (9 feeds) fetched and parsed 2026-10-18; recorder unit tests 9/9, mutation (drop `http_status` from required fields) fails a test; `check.py /var/lib/tidehold-recorder --expect <9 sources>` on oci-a1 at 2026-10-18 19:00 UTC: ok, 4 consecutive index fetches per source, all 200; fallback /deposits 200 | milestone (triggering CAP warning by 2026-10-30) still open; recorder keeps running until step 12 | 5a3c3d9 |
 | 2 Model benchmark | not started | | | |
 | 3 Walking skeleton | not started | | | |
 | 4 Money engine port | not started | | | |
