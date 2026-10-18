@@ -1,0 +1,11 @@
+[Unit]
+Description=tidehold: record official warning feeds every 30 minutes
+
+[Timer]
+# :00 and :30 are the same instants in UTC and in the host's whole-hour time zone.
+OnCalendar=*:00/30
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,21 @@
+[Unit]
+Description=tidehold: record official warning feeds
+Documentation=https://github.com/Will413028/tidehold/tree/main/recorder
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=tidehold-rec
+Group=tidehold-rec
+StateDirectory=tidehold-recorder
+StateDirectoryMode=0755
+ExecStart=/usr/bin/python3 -I /opt/tidehold-recorder/record.py --out /var/lib/tidehold-recorder
+TimeoutStartSec=20min
+Nice=10
+MemoryMax=256M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes

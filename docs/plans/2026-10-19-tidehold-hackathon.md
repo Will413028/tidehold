@@ -4,7 +4,7 @@
 
 **Upper level:** master list is outside this repo; see the local personal context file (`AGENTS.local.md`, untracked).
 
-**Attachments:** `2026-10-19-tidehold-hackathon/` — `requirements.md` (requirements, NFRs, interfaces, risks), `research-operators.md`, `research-ideation.md`, `scripts/check_plan.py`. Repo snapshot: see the commit that adds this plan.
+**Attachments:** `2026-10-19-tidehold-hackathon/` — `requirements.md` (requirements, NFRs, interfaces, risks), `research-operators.md`, `research-ideation.md`, `feeds-matrix.md` (step 1), `scripts/check_plan.py`. Repo snapshot: see the commit that adds this plan.
 
 ## Global constraints and definition of done (stand-in; there is no master plan)
 
@@ -169,7 +169,7 @@ States: not started / in progress / code done, acceptance pending / done.
 
 | Step | State | Acceptance run | Acceptance not run and why | commit |
 |---|---|---|---|---|
-| 1 Feeds spike and recorder | not started | | | |
+| 1 Feeds spike and recorder | code done, acceptance pending | feeds matrix: 7 sources (9 feeds) fetched and parsed 2026-10-18; recorder unit tests 9/9, mutation (drop `http_status` from required fields) fails a test; first VM run 9/9 sources 200 | ≥4 consecutive fetches: timer started 2026-10-18 17:52 UTC, 4th run due 19:00 UTC | |
 | 2 Model benchmark | not started | | | |
 | 3 Walking skeleton | not started | | | |
 | 4 Money engine port | not started | | | |
