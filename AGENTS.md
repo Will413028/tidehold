@@ -16,4 +16,4 @@ Weather-cancellation deposits for dive operators, built for the PayPal AI Hackat
 
 ## Reuse
 
-The money-command engine (stored-before-sent PayPal commands with PayPal-Request-Id, reconciliation, mandate check, server-verified citations, Temporal workflow) comes from the public dive-trip-agent repository's deposits module (`backend/src/dive_trip/modules/deposits/`, `docs/paypal-group-deposits.md`). Re-evaluate each mechanism when porting instead of copying it wholesale.
+The money-command engine (stored-before-sent PayPal commands with PayPal-Request-Id, reconciliation, mandate check, server-verified citations, Temporal workflow) comes from `Will413028/dive-trip-agent` at commit `8065eba` (branch `feat/paypal-deposits`): `backend/src/dive_trip/modules/deposits/` and its dependencies, as listed in the plan's step 4. Re-evaluate each mechanism when porting instead of copying it wholesale.
