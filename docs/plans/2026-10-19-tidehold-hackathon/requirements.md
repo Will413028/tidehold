@@ -12,13 +12,14 @@ Every item maps to a plan step (column "Step"); `scripts/check_plan.py` in this 
 | R2 | Flow | A clause that is silent or left to the operator's discretion is flagged "needs operator ruling"; the operator records a ruling; no rule is executed while unruled | S1, S2 | 5, 8 |
 | R3 | Data | A compiled policy is an immutable version; trips bind to one version | inferred from S1 (amounts must be reproducible) | 5 |
 | R4 | Flow | Operator creates a trip (site coordinates, warning area, dates, balance per guest) and invites guests | S1 | 6 |
-| R5 | Flow | Guest pays the trip balance as a PayPal Orders v2 AUTHORIZE through PayPal checkout, requested about 28 days before the trip (immediately when the trip is closer) | S1, S2 | 6 |
+| R5 | Flow | Guest pays the booking deposit through PayPal checkout (captured at booking) and the trip balance as a PayPal Orders v2 AUTHORIZE requested at T-(29 − N) for an N-day trip, trips ≤ 10 days (immediately when the trip is closer) | S1, S2, plan D3/D11 | 6 |
 | R6 | Flow | Official CAP warnings from the source the operator's policy names are fetched, stored with fetch time, and matched to the trip's area | S1, S2 | 7 |
 | R7 | Flow | Open-Meteo marine forecast at the site corroborates; it never triggers alone | S1, S2 | 7 |
 | R8 | Flow | Replay mode: a recorded feed set is served with its original fetch times; the agent sees only data timestamped before the decision time | S1, S2 | 7 |
 | R9 | Flow | Before each trip day the system evaluates the bound policy against the evidence; code computes each guest's outcome (void, partial capture with final_capture, capture, credit) | S1 | 8 |
 | R10 | Flow | Inside the operator's mandate the agent executes; outside it, or on an unruled clause, it stops and asks; the operator approves or rejects | S1 | 8 |
 | R11 | Data | Credit is an internal ledger record per guest, not a PayPal object | S1, S2 | 8 |
+| R19 | Flow | On a weather cancellation the captured deposit is refunded through PayPal or recorded as credit, per the compiled policy | plan D3 | 8 |
 | R12 | Screen | Guest transparency page: hold status, the official bulletin, the clause, the outcome | S1, S2 | 9 |
 | R13 | Screen | Operator console: policy compile and rulings, trips, guests, evidence, proposals, audit timeline | S1, S5 Design | 9 |
 | R14 | NFR | Every PayPal write is stored before it is sent with PayPal-Request-Id; unknown outcomes reconcile; holds stay within 29 days | S1 | 4, 6 |
