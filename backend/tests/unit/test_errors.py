@@ -4,7 +4,14 @@ import pytest
 from starlette.requests import Request
 
 from tidehold.bootstrap.app import domain_error
-from tidehold.platform.errors import Conflict, DomainError, LimitReached, NotFound, OutcomeUnknown
+from tidehold.platform.errors import (
+    Conflict,
+    DomainError,
+    LimitReached,
+    NotConfigured,
+    NotFound,
+    OutcomeUnknown,
+)
 
 
 @pytest.mark.parametrize(
@@ -14,6 +21,7 @@ from tidehold.platform.errors import Conflict, DomainError, LimitReached, NotFou
         (Conflict("PAYMENT_ATTEMPT_IN_FLIGHT"), 409, "PAYMENT_ATTEMPT_IN_FLIGHT"),
         (LimitReached("PAYPAL_DAILY_CAP_REACHED"), 429, "PAYPAL_DAILY_CAP_REACHED"),
         (OutcomeUnknown("PAYPAL_OUTCOME_UNKNOWN"), 503, "PAYPAL_OUTCOME_UNKNOWN"),
+        (NotConfigured("PAYPAL_NOT_CONFIGURED"), 501, "PAYPAL_NOT_CONFIGURED"),
         (DomainError("SOMETHING_INTERNAL"), 500, "INTERNAL_ERROR"),
     ],
 )

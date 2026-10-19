@@ -54,6 +54,8 @@ tidehold must act at specific times per trip: request the balance hold at T-(29 
 
 ## Review Notes
 
+- 2026-10-19 (plan step 6): "the demo can advance a workspace's clock to the next action" is superseded by D12 (trips and holds use real time; recorded warnings are replayed with an offset). The worker passes the wall clock into every claim; tests pass their own.
+
 ## Related
 
 - Source: decided by the developer on 2026-10-19 after two independent critiques and two independent drafts; this ADR is the original record.

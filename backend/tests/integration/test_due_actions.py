@@ -89,3 +89,17 @@ async def test_scheduling_the_same_work_twice_keeps_one_action(conn: Conn) -> No
     await due.schedule(conn, "reconcile_payment", payment_id=payment_id, due_at=T0 + timedelta(1))
 
     assert await _state(conn) == [("pending", 0)]
+
+
+async def test_each_kind_is_claimed_under_its_own_lease(conn: Conn) -> None:
+    await due.schedule(conn, "reconcile_payment", payment_id=await _payment(conn), due_at=T0)
+    leases: dict[due.Kind, timedelta] = {
+        "request_balance": timedelta(minutes=5),
+        "reconcile_payment": timedelta(seconds=7),
+    }
+
+    await due.claim(conn, T0, leases)
+    row = await (await conn.execute("select lease_until from due_actions")).fetchone()
+
+    assert row is not None
+    assert row["lease_until"] == T0 + timedelta(seconds=7)

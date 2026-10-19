@@ -9,13 +9,21 @@ from fastapi.responses import JSONResponse
 from tidehold.bootstrap import routes, worker
 from tidehold.bootstrap.http_boundary import HttpBoundary
 from tidehold.money.paypal import PayPalClient
-from tidehold.platform.errors import Conflict, DomainError, LimitReached, NotFound, Unavailable
+from tidehold.platform.errors import (
+    Conflict,
+    DomainError,
+    LimitReached,
+    NotConfigured,
+    NotFound,
+    Unavailable,
+)
 from tidehold.platform.settings import Settings, from_env
 
 STATUS_OF: dict[type[DomainError], int] = {
     NotFound: status.HTTP_404_NOT_FOUND,
     Conflict: status.HTTP_409_CONFLICT,
     LimitReached: status.HTTP_429_TOO_MANY_REQUESTS,
+    NotConfigured: status.HTTP_501_NOT_IMPLEMENTED,
     Unavailable: status.HTTP_503_SERVICE_UNAVAILABLE,
 }
 

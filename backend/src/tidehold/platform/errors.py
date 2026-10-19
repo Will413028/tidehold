@@ -23,8 +23,12 @@ class LimitReached(DomainError):
     """A cap that protects shared quota is used up for now."""
 
 
+class NotConfigured(DomainError):
+    """This server is not set up for the feature (e.g. no PayPal credentials)."""
+
+
 class Unavailable(DomainError):
-    """A dependency is down or not configured; trying again later may work."""
+    """A dependency is down; trying again later may work."""
 
 
 class OutcomeUnknown(Unavailable):

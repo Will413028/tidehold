@@ -13,7 +13,7 @@ from tidehold.holds.schedule import balance_opens_at
 from tidehold.money import service
 from tidehold.money.paypal import TEST_CARD, PayPalClient
 from tidehold.platform.db import Conn, connection
-from tidehold.platform.errors import Conflict, Unavailable
+from tidehold.platform.errors import Conflict, NotConfigured
 from tidehold.trips import store
 
 router = APIRouter(prefix="/api/guest/{token}")
@@ -92,7 +92,7 @@ async def _payment(conn: Conn, token: str, purpose: Purpose) -> UUID:
 def _paypal(request: Request) -> PayPalClient:
     client: PayPalClient | None = request.app.state.paypal
     if client is None:
-        raise Unavailable("PAYPAL_NOT_CONFIGURED")
+        raise NotConfigured("PAYPAL_NOT_CONFIGURED")
     return client
 
 

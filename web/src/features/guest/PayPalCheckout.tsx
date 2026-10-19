@@ -59,7 +59,7 @@ function loadSdk(clientId: string, intent: Intent): Promise<PayPalNamespace> {
 }
 
 export function describe(error: unknown): string {
-  if (error instanceof ApiError && error.detail === "PAYPAL_NOT_CONFIGURED") {
+  if (error instanceof ApiError && error.status === 501) {
     return "Payments are not set up on this server (no PayPal sandbox credentials).";
   }
   if (error instanceof ApiError && error.status === 503) {

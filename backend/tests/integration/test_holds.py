@@ -213,7 +213,7 @@ async def test_without_paypal_credentials_payments_are_unavailable(
         paid = await guest.post(f"/api/guest/{token}/deposit/test-card")
         config = await guest.get("/api/paypal/config")
 
-    assert (paid.status_code, paid.json()) == (503, {"detail": "PAYPAL_NOT_CONFIGURED"})
+    assert (paid.status_code, paid.json()) == (501, {"detail": "PAYPAL_NOT_CONFIGURED"})
     assert config.json() == {"client_id": None}
 
 

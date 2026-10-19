@@ -6,7 +6,9 @@ loses the action to the next claimer; its late completion is ignored because com
 names the attempt it claimed. Handlers must therefore be idempotent, which money commands
 already are (stored before sent, one live command per step).
 
-Time is passed in (`now`), never read here, so tests drive the clock.
+Time is passed in (`now`), so tests drive the clock. One exception: `schedule` without a
+`due_at` reads the database clock, for work that is due "soon" from a caller that has no
+clock (an unknown PayPal outcome inside `money.service.execute`).
 """
 
 import logging
@@ -16,13 +18,22 @@ from datetime import datetime, timedelta
 from typing import Literal
 from uuid import UUID
 
+from psycopg.types.json import Jsonb
+
 from tidehold.platform.db import Conn
 
 Kind = Literal["request_balance", "reconcile_payment"]
 
 log = logging.getLogger(__name__)
 
-LEASE = timedelta(seconds=60)
+# A handler must finish inside its kind's lease, or another worker takes the action over. Both
+# kinds today are database writes plus PayPal calls of at most 20 s each; a kind that calls a
+# model (plan step 8) gets a lease longer than its model timeout.
+LEASES: dict[Kind, timedelta] = {
+    "request_balance": timedelta(seconds=60),
+    "reconcile_payment": timedelta(seconds=60),
+}
+LEASE = max(LEASES.values())
 MAX_ATTEMPTS = 8
 
 
@@ -67,17 +78,22 @@ async def schedule(
     )
 
 
-async def claim(conn: Conn, now: datetime, lease: timedelta = LEASE) -> Action | None:
+async def claim(
+    conn: Conn, now: datetime, leases: Mapping[Kind, timedelta] = LEASES
+) -> Action | None:
+    """Claim the oldest due action, or one whose worker's lease expired, under its kind's lease."""
+    seconds = {kind: int(lease.total_seconds()) for kind, lease in leases.items()}
     row = await (
         await conn.execute(
-            "update due_actions set state = 'running', lease_until = %(until)s,"
+            "update due_actions set state = 'running',"
+            " lease_until = %(now)s + make_interval(secs => (%(leases)s::jsonb ->> kind)::int),"
             " attempts = attempts + 1"
             " where id = (select id from due_actions"
             "   where (state = 'pending' and due_at <= %(now)s)"
             "      or (state = 'running' and lease_until <= %(now)s)"
             "   order by due_at, id for update skip locked limit 1)"
             " returning id, kind, trip_id, payment_id, due_at, attempts",
-            {"now": now, "until": now + lease},
+            {"now": now, "leases": Jsonb(seconds)},
         )
     ).fetchone()
     return Action(**row) if row else None
@@ -96,7 +112,8 @@ async def complete(conn: Conn, action: Action, now: datetime) -> bool:
 
 
 async def retry(conn: Conn, action: Action, now: datetime, error: str) -> bool:
-    """Back off, or give up after MAX_ATTEMPTS (a failed action is shown to the operator)."""
+    """Back off, or give up after MAX_ATTEMPTS; a failed action stays for the operator console
+    (plan step 9) and is not recreated by schedules derived from trip state."""
     failed = action.attempts >= MAX_ATTEMPTS
     row = await (
         await conn.execute(
