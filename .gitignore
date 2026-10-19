@@ -10,3 +10,4 @@ AGENTS.local.md
 next-env.d.ts
 *.tsbuildinfo
 build/
+.coverage

@@ -1,6 +1,6 @@
 # `make check` is the gate: lefthook runs it (with `make security`) before every push,
 # and CI runs the same targets.
-.PHONY: check reports lint typecheck arch unit integration locks security dev-db dev-backend dev-web
+.PHONY: check reports lint typecheck arch unit integration locks coverage security dev-db dev-backend dev-web
 
 WEB := pnpm --dir web
 # Test reports read by `locks`; `check` starts from an empty directory so a suite that stops
@@ -43,6 +43,12 @@ integration:
 # Suppression comments may only go down and executed tests only up (quality-lock.json).
 locks:
 	python3 scripts/quality_lock.py check --reports $(REPORTS)
+
+# Report only, no threshold: line and branch coverage of the money path, read at each step's acceptance.
+coverage:
+	cd backend && uv run --frozen pytest -q tests \
+		--cov=tidehold.money --cov=tidehold.holds --cov=tidehold.settlement --cov-branch \
+		--cov-report=term-missing
 
 # Lockfiles are listed: a new one must be added here and in .github/workflows.
 security:
