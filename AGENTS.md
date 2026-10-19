@@ -37,7 +37,9 @@ Web (`web/src/`): `app` → `features` → `lib`. A feature does not import anot
 ## Checks
 
 - `make check`: lint, typecheck, layer checks, unit and integration tests (integration starts a PostgreSQL container; needs Docker). `make security`: gitleaks, osv-scanner, actionlint, zizmor.
-- Commits go straight to `main`. The gate is the lefthook `pre-push` hook, which runs `make check` and `make security`; run `lefthook install` once per clone. CI (`.github/workflows/ci.yml`) runs the same targets as a backup; `osv-weekly.yml` rescans `main` weekly.
+- Design rules beyond layering: ruff (`backend/pyproject.toml`; `recorder/` and `scripts/` have their own `ruff.toml`) adds complexity, swallowed errors, naive datetimes, boolean traps and `TRY`; mypy strict adds exhaustive `match`; Biome adds floating and misused promises and cognitive complexity. Only `backend/src/tidehold/platform/settings.py` and `web/src/lib/config.ts` (plus `next.config.ts`) read the environment (ruff `TID251`, Biome `noProcessEnv`). pytest runs in random order (pytest-randomly).
+- `quality-lock.json` locks every kind of suppression comment (`noqa`, `ruff: ignore`, `type: ignore`, `biome-ignore`, `ts-expect-error`, ...) and the executed test count per suite; `make locks` fails on any difference, so lower a suppression count or raise a test count in the change that earns it. A commit that raises a suppression count or lowers a test count needs a `Quality-lock-reason:` line in its message (checked on pre-push and in CI); list the tests removed with a deleted feature there. Fix new violations instead of suppressing them; the 13 `noqa` in `recorder/` are the baseline.
+- Commits go straight to `main`. The gate is the lefthook `pre-push` hook, which runs `make check`, `make security` and the lock history check; run `lefthook install` once per clone. CI (`.github/workflows/ci.yml`) runs the same targets as a backup; `osv-weekly.yml` rescans `main` weekly.
 - GitHub Actions are pinned by full commit SHA (images by digest) with the version in a comment; workflows default to `permissions: contents: read`.
 - Local dev: `make dev-db`, `make dev-backend`, `make dev-web`.
 

@@ -507,6 +507,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest-randomly"
+version = "5.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/01/3b/6a40e1b9d925651e601e056a97f60d8a1daeddeac03d5609be60cb4362ce/pytest_randomly-5.0.0.tar.gz", hash = "sha256:e9c575a5873ef168ddbe340ed9e97ce9edb4492ccc821e4b2ac6bb1f0ed515d2", size = 8542, upload-time = "2026-09-01T22:34:20.441Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/b4/47e939285caad9a623d021512912ac08dc92a467ad075d179f43729d2934/pytest_randomly-5.0.0-py3-none-any.whl", hash = "sha256:8a0d4703115c0c25b38b6e129fc16b1947b9643ff26a41bc1d185d7e5a7689c1", size = 8920, upload-time = "2026-09-01T22:34:19.227Z" },
+]
+
+[[package]]
 name = "python-dotenv"
 version = "1.2.4"
 source = { registry = "https://pypi.org/simple" }
@@ -623,6 +635,7 @@ dev = [
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
+    { name = "pytest-randomly" },
     { name = "ruff" },
     { name = "testcontainers" },
 ]
@@ -641,6 +654,7 @@ dev = [
     { name = "mypy", specifier = ">=2.4,<3" },
     { name = "pytest", specifier = ">=9.1,<10" },
     { name = "pytest-asyncio", specifier = ">=1.4,<2" },
+    { name = "pytest-randomly", specifier = ">=5.0,<6" },
     { name = "ruff", specifier = ">=0.17,<0.18" },
     { name = "testcontainers", specifier = ">=4.15,<5" },
 ]

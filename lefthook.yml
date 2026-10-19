@@ -7,3 +7,6 @@ pre-push:
       run: make check
     security:
       run: make security
+    # A commit that loosens quality-lock.json must say why (Quality-lock-reason: line).
+    locks-history:
+      run: python3 scripts/quality_lock.py history origin/main

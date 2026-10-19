@@ -60,7 +60,7 @@ SOURCES: tuple[Source, ...] = (
         accept="application/geo+json",
     ),
     *(
-        Source(f"meteoalarm-{code}", f"https://feeds.meteoalarm.org/feeds/meteoalarm-legacy-atom-{country}", pick=_cap_link)
+        Source(f"meteoalarm-{code}", f"https://feeds.meteoalarm.org/feeds/meteoalarm-legacy-atom-{country}", pick=_cap_link)  # noqa: E501
         for code, country in (("gr", "greece"), ("mt", "malta"), ("hr", "croatia"))
     ),
     Source(
@@ -68,8 +68,8 @@ SOURCES: tuple[Source, ...] = (
         "https://www.data.jma.go.jp/developer/xml/feed/other_l.xml",
         pick=lambda link: link.title.startswith(("地方海上警報", "全般海上警報")),
     ),
-    Source("bmkg", "https://www.bmkg.go.id/alerts/nowcast/en/rss.xml", pick=lambda link: link.href.endswith("_alert.xml")),
-    Source("cwa-ncdr", "https://alerts.ncdr.nat.gov.tw/RssAtomFeeds.ashx", pick=lambda link: link.href.endswith(".cap")),
+    Source("bmkg", "https://www.bmkg.go.id/alerts/nowcast/en/rss.xml", pick=lambda link: link.href.endswith("_alert.xml")),  # noqa: E501
+    Source("cwa-ncdr", "https://alerts.ncdr.nat.gov.tw/RssAtomFeeds.ashx", pick=lambda link: link.href.endswith(".cap")),  # noqa: E501
     # BoM publishes no public CAP; the state warnings RSS includes marine wind warnings.
     Source("bom-qld", "https://reg.bom.gov.au/fwo/IDZ00056.warnings_qld.xml", pick=lambda link: True),
 )
@@ -87,9 +87,9 @@ Fetch = Callable[[str, str], Response]
 
 
 def http_fetch(url: str, accept: str) -> Response:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})  # noqa: S310
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:  # noqa: S310
             return Response(response.status, response.headers.get("Content-Type"), response.read(MAX_BODY))
     except urllib.error.HTTPError as exc:
         return Response(exc.code, exc.headers.get("Content-Type"), exc.read(MAX_BODY))
@@ -99,7 +99,7 @@ def http_fetch(url: str, accept: str) -> Response:
 
 def feed_links(body: bytes) -> list[Link]:
     """Links of Atom entries or RSS items, in feed order."""
-    root = ET.fromstring(body)
+    root = ET.fromstring(body)  # noqa: S314
     links: list[Link] = []
     for entry in root.iter(f"{ATOM}entry"):
         title = (entry.findtext(f"{ATOM}title") or "").strip()
@@ -145,7 +145,7 @@ def write_envelope(out: Path, record: dict) -> Path:
 
 
 def _now() -> dt.datetime:
-    return dt.datetime.now(dt.timezone.utc)
+    return dt.datetime.now(dt.timezone.utc)  # noqa: UP017
 
 
 def record_source(source: Source, out: Path, fetch: Fetch = http_fetch, now: Callable[[], dt.datetime] = _now) -> dict:
@@ -187,8 +187,8 @@ def main(argv: list[str] | None = None) -> int:
             continue
         try:
             print(json.dumps(record_source(source, args.out)), flush=True)
-        except Exception as exc:  # one broken source must not stop the others
-            print(json.dumps({"source": source.name, "crash": f"{type(exc).__name__}: {exc}"}), file=sys.stderr, flush=True)
+        except Exception as exc:  # one broken source must not stop the others  # noqa: BLE001
+            print(json.dumps({"source": source.name, "crash": f"{type(exc).__name__}: {exc}"}), file=sys.stderr, flush=True)  # noqa: E501
     return 0
 
 

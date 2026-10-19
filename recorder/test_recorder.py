@@ -21,7 +21,7 @@ RSS_FEED = b"""<?xml version="1.0"?><rss version="2.0"><channel>
   <item><title>Thunderstorm</title><link>https://example.test/X_alert.xml</link></item>
 </channel></rss>"""
 
-T0 = dt.datetime(2026, 10, 19, 0, 0, tzinfo=dt.timezone.utc)
+T0 = dt.datetime(2026, 10, 19, 0, 0, tzinfo=dt.timezone.utc)  # noqa: UP017
 
 
 class FakeHttp:
@@ -51,9 +51,9 @@ def read_all(root: Path):
 
 class FeedLinks(unittest.TestCase):
     def test_atom_and_rss_links_are_read_in_order(self):
-        self.assertEqual([l.href for l in record.feed_links(ATOM_FEED)],
+        self.assertEqual([l.href for l in record.feed_links(ATOM_FEED)],  # noqa: E741
                          ["https://example.test/a.cap", "https://example.test/b.html", "https://example.test/b.cap"])
-        self.assertEqual(record.feed_links(RSS_FEED), [record.Link("Thunderstorm", "https://example.test/X_alert.xml", "")])
+        self.assertEqual(record.feed_links(RSS_FEED), [record.Link("Thunderstorm", "https://example.test/X_alert.xml", "")])  # noqa: E501
 
 
 class RecordSource(unittest.TestCase):

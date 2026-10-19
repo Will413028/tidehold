@@ -1,0 +1,12 @@
+# Stdlib-only repository scripts, tested with unittest.
+line-length = 100
+target-version = "py313"
+
+[lint]
+select = [
+    "E", "W", "F", "I", "B", "UP", "S", "SIM", "RUF", "PGH", "TID",
+    "C90", "PLR09", "BLE", "DTZ", "FBT", "TRY", "PLW0603",
+]
+# TRY003: messages at the raise site. S314: the XML parsed here is our own test reports.
+# S603, S607: git is called with fixed arguments.
+ignore = ["TRY003", "S314", "S603", "S607"]

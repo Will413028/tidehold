@@ -9,3 +9,4 @@ AGENTS.local.md
 .next/
 next-env.d.ts
 *.tsbuildinfo
+build/

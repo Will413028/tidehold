@@ -1,0 +1,20 @@
+{
+  "suppressions": {
+    "noqa": 13,
+    "ruff": 0,
+    "type-ignore": 0,
+    "pyright-ignore": 0,
+    "nolint": 0,
+    "eslint-disable": 0,
+    "biome-ignore": 0,
+    "ts-expect-error": 0,
+    "ts-ignore": 0
+  },
+  "tests": {
+    "backend-unit": 1,
+    "backend-integration": 6,
+    "web": 3,
+    "recorder": 9,
+    "scripts": 7
+  }
+}

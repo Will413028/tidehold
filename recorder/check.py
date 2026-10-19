@@ -17,7 +17,7 @@ from pathlib import Path
 REQUIRED = ("source", "url", "fetched_at", "http_status")
 
 
-def file_problem(path: Path, record: dict) -> str | None:
+def file_problem(path: Path, record: dict) -> str | None:  # noqa: PLR0911
     missing = [key for key in REQUIRED if key not in record]
     if missing:
         return f"{path}: missing {', '.join(missing)}"

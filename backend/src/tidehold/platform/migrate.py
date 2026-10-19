@@ -1,10 +1,11 @@
 """Apply `migrations/*.sql` in name order, each once, recorded in `schema_migrations`."""
 
-import os
 import sys
 from importlib.resources import files
 
 import psycopg
+
+from tidehold.platform.settings import from_env
 
 
 def migrate(database_url: str) -> list[str]:
@@ -35,5 +36,5 @@ def migrate(database_url: str) -> list[str]:
 
 
 if __name__ == "__main__":
-    for name in migrate(os.environ["DATABASE_URL"]):
+    for name in migrate(from_env().database_url):
         print(f"applied {name}", file=sys.stderr)

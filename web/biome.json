@@ -7,7 +7,16 @@
     "enabled": true,
     "rules": {
       "preset": "recommended",
-      "suspicious": { "noFocusedTests": "error", "noSkippedTests": "error" }
+      "suspicious": { "noFocusedTests": "error", "noSkippedTests": "error" },
+      "complexity": { "noExcessiveCognitiveComplexity": "error" },
+      "style": { "noProcessEnv": "error" },
+      "nursery": { "noFloatingPromises": "error", "noMisusedPromises": "error" }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["next.config.ts", "src/lib/config.ts"],
+      "linter": { "rules": { "style": { "noProcessEnv": "off" } } }
+    }
+  ]
 }
