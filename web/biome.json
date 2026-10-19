@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": { "includes": ["**", "!node_modules", "!.next", "!next-env.d.ts"] },
+  "formatter": { "enabled": true, "indentStyle": "space", "lineWidth": 110 },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "suspicious": { "noFocusedTests": "error", "noSkippedTests": "error" }
+    }
+  }
+}

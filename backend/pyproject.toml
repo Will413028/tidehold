@@ -1,0 +1,73 @@
+[project]
+name = "tidehold"
+version = "0.1.0"
+description = "Weather-cancellation deposits for dive operators"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "fastapi>=0.143,<1",
+    "psycopg[binary]>=3.3,<4",
+    "uvicorn>=0.54,<1",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28,<1",
+    "import-linter>=2.15,<3",
+    "mypy>=2.4,<3",
+    "pytest>=9.1,<10",
+    "pytest-asyncio>=1.4,<2",
+    "ruff>=0.17,<0.18",
+    "testcontainers>=4.15,<5",
+]
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
+
+[tool.uv]
+# Resolve only releases at least a week old, so a compromised release has time to be yanked.
+exclude-newer = "1 week"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+filterwarnings = ["error"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "S", "SIM", "RUF", "PGH", "ASYNC", "PT", "TID"]
+# S101: assert is how pytest checks.
+per-file-ignores = { "tests/**" = ["S101"] }
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+packages = ["tidehold", "tests"]
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = ["testcontainers.*"]
+ignore_missing_imports = true
+
+[tool.importlinter]
+root_package = "tidehold"
+
+[[tool.importlinter.contracts]]
+name = "Layers: a module imports only modules below it; modules in one layer are independent"
+type = "layers"
+containers = ["tidehold"]
+# A new top-level module must be placed in a layer before it can be imported.
+exhaustive = true
+layers = [
+    "bootstrap",
+    "settlement",
+    "holds",
+    "trips | warnings",
+    "policy | money | identity",
+    "platform",
+]

@@ -1,0 +1,9 @@
+# Commits go straight to main, so pre-push is where a change is stopped; CI is the backup.
+# Install once per clone: `lefthook install` (with a global core.hooksPath that dispatches to
+# .git/hooks: `GIT_CONFIG_GLOBAL=/dev/null lefthook install`).
+pre-push:
+  commands:
+    check:
+      run: make check
+    security:
+      run: make security

@@ -1,0 +1,9 @@
+# Resolve only releases at least a week old (minutes). Setting it explicitly makes pnpm
+# fail instead of falling back to a younger version.
+minimumReleaseAge: 10080
+
+# Install scripts run only for the packages listed here.
+allowBuilds:
+  sharp: false
+  "@parcel/watcher": false
+  unrs-resolver: false

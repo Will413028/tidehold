@@ -7,3 +7,15 @@ An AI agent turns a dive operator's own cancellation wording into structured rul
 PayPal sandbox and synthetic guests only; no real money moves. Whether a boat goes out is always the operator's call; this is not a dive-safety tool.
 
 Work in progress.
+
+## Develop
+
+Needs Python 3.13 with [uv](https://docs.astral.sh/uv/), Node 22+ with pnpm, Docker and [lefthook](https://lefthook.dev/).
+
+```sh
+uv sync --project backend && pnpm --dir web install && lefthook install
+make check          # lint, typecheck, layer checks, unit and integration tests
+make dev-db         # PostgreSQL 18 on 127.0.0.1:5433
+make dev-backend    # migrate, then the API on :8000
+make dev-web        # Next.js on :3000, proxying /api to the backend
+```

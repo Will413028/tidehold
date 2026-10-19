@@ -1,6 +1,6 @@
 # tidehold
 
-Weather-cancellation deposits for dive operators, built for the PayPal AI Hackathon on Devpost. Empty repository: no runnable scaffold, commands or stack yet.
+Weather-cancellation deposits for dive operators, built for the PayPal AI Hackathon on Devpost. `backend/` is FastAPI on PostgreSQL 18 (Python 3.13, uv), `web/` is Next.js (TypeScript, pnpm), `recorder/` records official warning feeds (stdlib Python, runs on the VM).
 
 ## Product contract (decided)
 
@@ -18,3 +18,31 @@ Weather-cancellation deposits for dive operators, built for the PayPal AI Hackat
 ## Reuse
 
 The money-command engine (stored-before-sent PayPal commands with PayPal-Request-Id, reconciliation, mandate check, server-verified citations) comes from `Will413028/dive-trip-agent` at commit `8065eba` (branch `feat/paypal-deposits`): `backend/src/dive_trip/modules/deposits/` and its dependencies, as listed in the plan's step 4. Re-evaluate each mechanism when porting instead of copying it wholesale. Time-based work runs on a PostgreSQL `due_actions` table, not a workflow engine (`docs/adr/2026-10-19-runtime-without-workflow-engine.md`).
+
+## Layers
+
+Backend (`backend/src/tidehold/`), top to bottom; a module imports only modules below it, and modules on one line are independent of each other:
+
+1. `bootstrap`: FastAPI app and wiring
+2. `settlement`
+3. `holds`
+4. `trips` | `warnings`
+5. `policy` | `money` | `identity`
+6. `platform`: settings, database, migrations
+
+`warnings` does not import `trips`; the caller passes the warning area in. A new top-level module must be added to the `[tool.importlinter]` layers in `backend/pyproject.toml` (the contract is exhaustive). When a check fails, move the code; do not add an `ignore_imports` exception.
+
+Web (`web/src/`): `app` → `features` → `lib`. A feature does not import another feature (shared code goes to `lib`); `app` imports a feature only through its `index.ts`; server-only modules import `server-only`. Enforced by `web/.dependency-cruiser.cjs`.
+
+## Checks
+
+- `make check`: lint, typecheck, layer checks, unit and integration tests (integration starts a PostgreSQL container; needs Docker). `make security`: gitleaks, osv-scanner, actionlint, zizmor.
+- Commits go straight to `main`. The gate is the lefthook `pre-push` hook, which runs `make check` and `make security`; run `lefthook install` once per clone. CI (`.github/workflows/ci.yml`) runs the same targets as a backup; `osv-weekly.yml` rescans `main` weekly.
+- GitHub Actions are pinned by full commit SHA (images by digest) with the version in a comment; workflows default to `permissions: contents: read`.
+- Local dev: `make dev-db`, `make dev-backend`, `make dev-web`.
+
+## Dependencies
+
+- Agents do not add or upgrade dependencies on their own: list the package and version, confirm it exists and is not newly registered (check the registry's release history), and wait for approval.
+- New releases are taken only after a week: `exclude-newer = "1 week"` in `backend/pyproject.toml`, `minimumReleaseAge: 10080` in `web/pnpm-workspace.yaml`, Dependabot `cooldown` 7 days. Lockfiles are committed; osv-scanner lists them explicitly, so a new lockfile is added to `make security` and both workflows.
+- Vulnerability fix deadlines from the advisory's publication: critical 7 days, high 14 days, moderate and low 30 days. Report channel: `SECURITY.md`.
