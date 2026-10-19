@@ -126,8 +126,8 @@
 - **D3 Booking deposit scope** (status: decided 2026-10-19, developer: B; ADR: `docs/adr/2026-10-19-deposit-capture-and-balance-hold.md`; blocks: 6)
   - A: deposit stays with the operator's existing process, shown as "handled by operator"; tidehold holds only the balance
   - B: deposit captured through PayPal at booking, refunded or credited per policy on a weather cancellation — full PayPal lifecycle (capture, authorize, void, partial capture, refund) and matches operators that already take PayPal deposits (chosen)
-- **D4 Warning sources in v1** (status: open, after step 1; blocks: 7)
-  - A: PAGASA + NWS + one more that passes step 1 (MeteoAlarm or BMKG) — three real sources; the demo's real clauses must map to a source or to "needs ruling" (recommended)
+- **D4 Warning sources in v1** (status: decided 2026-10-19, developer: A as PAGASA + NWS + MeteoAlarm; JMA replaces PAGASA if the recorder sees no PAGASA wind or tropical-cyclone warning by 2026-10-30, since up to 2026-10-19 01:30 UTC PAGASA recorded only General Flood Advisories; `feeds-matrix.md`; blocks: 7)
+  - A: PAGASA + NWS + one more that passes step 1 (MeteoAlarm or BMKG) — three real sources; the demo's real clauses must map to a source or to "needs ruling" (chosen, MeteoAlarm: explicit wind and coastal awareness types and levels; BMKG nowcasts carry only thunderstorms)
   - B: PAGASA only — fastest, contradicts "not only SEA"
   - C: all seven — broadest, risk of half-working adapters
 - **D5 Demo hosting** (status: decided 2026-10-19, developer: A; blocks: 10)
@@ -157,11 +157,11 @@
   - A: a new PayPal sandbox app and the same model keys, referenced from a separate secrets directory on the VM — isolates PayPal data; model quota is shared with the fallback (recommended)
   - B: share everything with the fallback stack — no setup, but both demos share the sandbox merchant and quota
   - C: new app and new model keys — full isolation, more setup
-- **D14 Recorded-feed storage** (status: open, after step 1 reads licences; blocks: 10)
-  - A: keep recordings on the VM outside the repo and commit only the samples used in the demo with licence lines — repo stays small, licences respected (recommended)
+- **D14 Recorded-feed storage** (status: decided 2026-10-19, developer: A; recordings stay in `/var/lib/tidehold-recorder` on the VM; before committing a sample, read MeteoAlarm's redistribution terms and JMA's terms of use; blocks: 10)
+  - A: keep recordings on the VM outside the repo and commit only the samples used in the demo with licence lines — repo stays small, licences respected (chosen)
   - B: commit all recordings — reproducible, but large and licence varies by source
 
-Decision order: D1, D3, D5, D7, D10, D11, D12, D13 decided 2026-10-19; D4 and D14 after step 1; D6 provisional after step 2; D8 after step 12.
+Decision order: D1, D3, D4, D5, D7, D10, D11, D12, D13, D14 decided 2026-10-19; D6 provisional after step 2; D8 after step 12.
 
 ## Progress
 
