@@ -2,6 +2,28 @@
 
 Measurements, coverage reports and sandbox runs that plan steps cite in their acceptance. Newest first within each step.
 
+## Step 7: official warnings and corroboration
+
+### Recorded feeds read into the evidence store (2026-10-19 14:00 UTC)
+
+All 927 recorder files from `oci-a1:/var/lib/tidehold-recorder` (2026-10-18 17:51 to 2026-10-19 13:30 UTC) through `python -m tidehold.bootstrap.ingest_warnings` into a local PostgreSQL 18: `{"new": 1071, "seen": 11013, "unreadable": 0}` in 20 s. Warnings by source and event (first fetch, last expiry, UTC):
+
+| Source | Event | Count | First fetch | Last expiry |
+|---|---|---|---|---|
+| NWS | Small Craft Advisory | 656 | 10-18 17:52 | 10-24 10:00 |
+| NWS | Gale Warning | 271 | 10-18 17:52 | 10-22 10:00 |
+| NWS | Gale Watch | 20 | 10-18 17:52 | 10-22 00:00 |
+| NWS | Special Marine Warning / Hazardous Seas Warning / Storm Watch / Storm Warning / other | 18 | 10-18 17:52 | 10-21 01:00 |
+| MeteoAlarm (GR, HR, MT) | Yellow wind warning | 23 | 10-18 17:52 | 10-21 13:59 |
+| MeteoAlarm | Yellow fog / Moderate thunderstorm / Moderate rain warning | 29 | 10-18 17:52 | 10-20 06:59 |
+| PAGASA | General Flood Advisory (Moderate / Final) | 54 | 10-18 17:51 | 10-19 21:43 |
+
+Read: NWS gale and storm warnings and MeteoAlarm wind warnings are recorded triggers for a demo rule; PAGASA has still carried only flood advisories (D4: JMA replaces PAGASA if no wind or tropical-cyclone warning is recorded by 2026-10-30).
+
+### Open-Meteo corroboration, one live call (2026-10-19 14:05 UTC)
+
+`openmeteo.fetch` for Anilao (13.7565, 120.9137), 2026-10-19 to 10-21: daily `wave_height_max` 0.26, 0.14 and 0.80 m (`https://marine-api.open-meteo.com/v1/marine?latitude=13.75650&longitude=120.91370&daily=wave_height_max&timezone=UTC&start_date=2026-10-19&end_date=2026-10-21`).
+
 ## Step 4: money engine port
 
 ### Coverage of the money path (2026-10-19, report only)

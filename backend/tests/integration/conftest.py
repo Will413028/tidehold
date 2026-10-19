@@ -30,7 +30,7 @@ def _truncate(database_url: str) -> None:
     with psycopg.connect(database_url) as conn:
         conn.execute(
             "truncate due_actions, guests, payment_events, money_commands, payments, trips,"
-            " workspaces"
+            " warning_replays, official_warnings, corroborations, workspaces"
         )
 
 

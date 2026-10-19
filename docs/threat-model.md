@@ -51,8 +51,8 @@ Trust boundaries: browser ↔ backend (anonymous cookie session or guest link); 
 
 | What can go wrong | Response | Where, and the proof |
 |---|---|---|
-| A crafted or replayed feed triggers payouts | Only CAP warnings from the source the policy names trigger; Open-Meteo only corroborates; replayed recordings are labelled with their original fetch time | Step 7: parser tests on recorded samples; step 8 settlement tests |
-| The agent sees evidence from after the decision time | Evidence is filtered by `fetched_at` (or replay-shifted time) before each decision | Step 7: mutation "drop the time filter" fails a test |
+| A crafted or replayed feed triggers payouts | Only CAP warnings from the source the policy names trigger; Open-Meteo only corroborates; replayed recordings are labelled with their original fetch time | Feed XML is parsed with defusedxml (entities and DTDs refused: `test_untrusted_xml_that_is_not_a_plain_cap_alert_is_refused`); parser tests on recorded PAGASA and NWS samples; a replay is visible only to the workspace that made it (`test_a_replayed_warning_is_seen_only_by_its_workspace_from_its_shifted_time`); step 8 settlement tests |
+| The agent sees evidence from after the decision time | Evidence is filtered by `fetched_at` (or replay-shifted time) before each decision | `test_evidence_fetched_after_the_decision_time_is_invisible` (mutation: drop the time filter) |
 | A capture lands outside the authorization's validity | Holds start at T-(29 − N); reauthorize before a capture after the honor period; trips over 10 days refused | Steps 6 and 8: validity test for the longest allowed trip |
 
 ## Personal data inventory

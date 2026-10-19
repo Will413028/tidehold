@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Weather-cancellation deposits for dive operators"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+    "defusedxml>=0.7.1,<0.8",
     "fastapi>=0.143,<1",
     "httpx2>=2.13,<3",
     "psycopg[binary]>=3.3,<4",
@@ -70,7 +71,7 @@ packages = ["tidehold", "tests"]
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
-module = ["testcontainers.*"]
+module = ["testcontainers.*", "defusedxml.*"]
 ignore_missing_imports = true
 
 [tool.importlinter]
