@@ -1,0 +1,381 @@
+{
+ "version": 1,
+ "fixtures": {
+  "pure-dive": {
+   "split": "dev",
+   "rules": [
+    {
+     "product": null,
+     "causes": [
+      "weather"
+     ],
+     "warning": {
+      "named_as": "local authorities",
+      "source": null,
+      "event_values": [],
+      "quote": ""
+     },
+     "scope": "per_trip",
+     "applies_to": "both",
+     "remedies": [
+      {
+       "kind": "refund",
+       "percent": 100,
+       "deductions": [],
+       "credit_expiry_months": null
+      },
+      {
+       "kind": "credit",
+       "percent": 100,
+       "deductions": [],
+       "credit_expiry_months": null
+      }
+     ],
+     "chooser": null,
+     "quote": "We do not cancel our dive trips trips because of the weather (rain, clouds etc.) unless there has been an official storm warning issued by the local authorities. In this case your trip will be either rescheduled or refunded."
+    }
+   ],
+   "needs_ruling": [
+    "warning_source_unnamed",
+    "remedy_chooser_unclear",
+    "outcome_unspecified",
+    "credit_expiry_unspecified"
+   ]
+  },
+  "blue-ribbon": {
+   "split": "dev",
+   "rules": [
+    {
+     "product": null,
+     "causes": [
+      "weather",
+      "safety"
+     ],
+     "warning": null,
+     "scope": "per_day",
+     "applies_to": "both",
+     "remedies": [
+      {
+       "kind": "credit",
+       "percent": 100,
+       "deductions": [],
+       "credit_expiry_months": null
+      }
+     ],
+     "chooser": null,
+     "quote": "If we cancel or reschedule a dive activity due to weather conditions, sea state, or any other safety concern, you will receive full credit toward rebooking at a future date at no additional cost."
+    }
+   ],
+   "needs_ruling": [
+    "credit_expiry_unspecified"
+   ]
+  },
+  "mikes-dauin": {
+   "split": "dev",
+   "rules": [],
+   "needs_ruling": [
+    "no_weather_clause"
+   ]
+  },
+  "scuba-tribe": {
+   "split": "dev",
+   "rules": [
+    {
+     "product": "Fun Dives:",
+     "causes": [
+      "weather",
+      "safety"
+     ],
+     "warning": null,
+     "scope": "per_trip",
+     "applies_to": "both",
+     "remedies": [
+      {
+       "kind": "refund",
+       "percent": 100,
+       "deductions": [
+        {
+         "kind": "percent",
+         "value": 3.5,
+         "label": "online payment processing fee"
+        }
+       ],
+       "credit_expiry_months": null
+      },
+      {
+       "kind": "credit",
+       "percent": 100,
+       "deductions": [],
+       "credit_expiry_months": null
+      }
+     ],
+     "chooser": "guest",
+     "quote": "If we cancel the trip due to weather or safety reasons, you’ll receive a full refund (minus 3.5% processing fee for online payments) or the option to reschedule to another available date."
+    },
+    {
+     "product": "Courses",
+     "causes": [
+      "weather"
+     ],
+     "warning": null,
+     "scope": "per_day",
+     "applies_to": "both",
+     "remedies": [
+      {
+       "kind": "credit",
+       "percent": 100,
+       "deductions": [],
+       "credit_expiry_months": null
+      }
+     ],
+     "chooser": null,
+     "quote": "If diving activities are delayed due to weather or a valid medical reason (supported by a doctor’s note), we’ll reschedule your dives at no additional cost."
+    }
+   ],
+   "needs_ruling": [
+    "credit_expiry_unspecified"
+   ]
+  },
+  "wetzone": {
+   "split": "dev",
+   "rules": [
+    {
+     "product": "For Daytrips (Diving, Snorkeling, Tours) on “Blue Marlin”:",
+     "causes": [
+      "any"
+     ],
+     "warning": null,
+     "scope": "per_trip",
+     "applies_to": "both",
+     "remedies": [
+      {
+       "kind": "refund",
+       "percent": 100,
+       "deductions": [],
+       "credit_expiry_months": null
+      }
+     ],
+     "chooser": null,
+     "quote": "1.1 Wetzone Co. Ltd. will refund all monies paid by the customer where the Company itself cancels a trip due to weather conditions or other circumstances."
+    }
+   ],
+   "needs_ruling": [
+    "conflicting_clauses"
+   ]
+  },
+  "kaia": {
+   "split": "held_out",
+   "rules": [
+    {
+     "product": null,
+     "causes": [
+      "any"
+     ],
+     "warning": null,
+     "scope": "per_trip",
+     "applies_to": "both",
+     "remedies": [
+      {
+       "kind": "refund",
+       "percent": 100,
+       "deductions": [],
+       "credit_expiry_months": null
+      }
+     ],
+     "chooser": null,
+     "quote": "full refund is made in case of impossibility on the part of the provider to provide the service in full"
+    }
+   ],
+   "needs_ruling": [
+    "warning_source_unnamed",
+    "outcome_unspecified"
+   ]
+  },
+  "dive-komodo": {
+   "split": "held_out",
+   "rules": [
+    {
+     "product": null,
+     "causes": [
+      "any"
+     ],
+     "warning": null,
+     "scope": "per_trip",
+     "applies_to": "both",
+     "remedies": [
+      {
+       "kind": "credit",
+       "percent": 100,
+       "deductions": [],
+       "credit_expiry_months": null
+      },
+      {
+       "kind": "refund",
+       "percent": 100,
+       "deductions": [],
+       "credit_expiry_months": null
+      }
+     ],
+     "chooser": null,
+     "quote": "We reserve the right to cancel operations for safety or operational reasons. We will offer alternatives (different boat/dates) or a trip refund."
+    }
+   ],
+   "needs_ruling": [
+    "remedy_chooser_unclear",
+    "operator_discretion",
+    "conflicting_clauses",
+    "credit_expiry_unspecified"
+   ]
+  },
+  "dragon-dive": {
+   "split": "held_out",
+   "rules": [
+    {
+     "product": null,
+     "causes": [
+      "weather"
+     ],
+     "warning": {
+      "named_as": "Komodo National Park or Indonesian authorities",
+      "source": null,
+      "event_values": [],
+      "quote": ""
+     },
+     "scope": "per_trip",
+     "applies_to": "both",
+     "remedies": [
+      {
+       "kind": "none",
+       "percent": 0,
+       "deductions": [],
+       "credit_expiry_months": null
+      }
+     ],
+     "chooser": null,
+     "quote": "If Komodo National Park or Indonesian authorities decide to close access to the park (weather, regulation, quota limits, force majeure), no refund will be possible"
+    }
+   ],
+   "needs_ruling": [
+    "warning_source_unnamed"
+   ]
+  },
+  "aquatic-apes": {
+   "split": "held_out",
+   "rules": [
+    {
+     "product": "Freediving Courses, Training Sessions, Spearfishing Courses & Day Charters",
+     "causes": [
+      "any"
+     ],
+     "warning": null,
+     "scope": "per_trip",
+     "applies_to": "both",
+     "remedies": [
+      {
+       "kind": "credit",
+       "percent": 100,
+       "deductions": [],
+       "credit_expiry_months": null
+      },
+      {
+       "kind": "refund",
+       "percent": 100,
+       "deductions": [],
+       "credit_expiry_months": null
+      }
+     ],
+     "chooser": "guest",
+     "quote": "If a course or charter is cancelled by the operator due to unsafe conditions or unforeseen operational circumstances, guests may choose to reschedule or receive a full refund."
+    },
+    {
+     "product": "Weather & Conditions (Courses)",
+     "causes": [
+      "weather"
+     ],
+     "warning": null,
+     "scope": "per_day",
+     "applies_to": "both",
+     "remedies": [
+      {
+       "kind": "refund",
+       "percent": 100,
+       "deductions": [],
+       "credit_expiry_months": null
+      }
+     ],
+     "chooser": null,
+     "quote": "If a course cannot be completed due to weather or conditions, a refund will be issued for any incomplete sessions."
+    },
+    {
+     "product": "Liveaboard Trips",
+     "causes": [
+      "any"
+     ],
+     "warning": null,
+     "scope": "per_trip",
+     "applies_to": "both",
+     "remedies": [
+      {
+       "kind": "credit",
+       "percent": 100,
+       "deductions": [],
+       "credit_expiry_months": 12
+      },
+      {
+       "kind": "refund",
+       "percent": 100,
+       "deductions": [],
+       "credit_expiry_months": null
+      }
+     ],
+     "chooser": "guest",
+     "quote": "If the operator cancels a liveaboard due to weather, safety concerns, mechanical issues, or force majeure, guests may choose:"
+    }
+   ],
+   "needs_ruling": [
+    "deduction_unspecified",
+    "operator_discretion",
+    "credit_expiry_unspecified"
+   ]
+  }
+ },
+ "event_sets": [
+  {
+   "id": "nws-gale",
+   "source": "nws",
+   "wording": "a gale warning",
+   "expected": [
+    "Gale Warning"
+   ]
+  },
+  {
+   "id": "nws-small-craft-up",
+   "source": "nws",
+   "wording": "any small craft advisory, or a gale, storm or hurricane force wind warning",
+   "expected": [
+    "Small Craft Advisory",
+    "Gale Warning",
+    "Storm Warning",
+    "Hurricane Force Wind Warning"
+   ]
+  },
+  {
+   "id": "meteoalarm-orange-wind",
+   "source": "meteoalarm",
+   "wording": "an orange or red wind warning",
+   "expected": [
+    "Wind:orange",
+    "Wind:red"
+   ]
+  },
+  {
+   "id": "meteoalarm-red-coast-storm",
+   "source": "meteoalarm",
+   "wording": "a red warning for coastal events or thunderstorms",
+   "expected": [
+    "Coastal event:red",
+    "Thunderstorm:red"
+   ]
+  }
+ ]
+}

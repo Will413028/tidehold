@@ -15,12 +15,13 @@ reports:
 	rm -rf $(REPORTS) && mkdir -p $(REPORTS)
 
 lint:
-	cd backend && uv run --frozen ruff format --check . ../scripts
-	cd backend && uv run --frozen ruff check . ../recorder ../scripts
+	cd backend && uv run --frozen ruff format --check . ../scripts ../bench
+	cd backend && uv run --frozen ruff check . ../recorder ../scripts ../bench
 	$(WEB) lint
 
 typecheck:
 	cd backend && uv run --frozen mypy
+	cd backend && uv run --frozen mypy ../bench
 	$(WEB) typecheck
 
 arch:
@@ -31,6 +32,7 @@ arch:
 unit:
 	mkdir -p $(REPORTS)
 	cd backend && uv run --frozen pytest -q tests/unit --junitxml=$(REPORTS)/backend-unit.xml
+	cd backend && uv run --frozen pytest -q ../bench --junitxml=$(REPORTS)/bench.xml
 	$(WEB) test --reporter=default --reporter=junit --outputFile.junit=$(REPORTS)/web.xml
 	cd recorder && $(call UNITTEST,test_recorder,recorder)
 	cd scripts && $(call UNITTEST,test_quality_lock,scripts)

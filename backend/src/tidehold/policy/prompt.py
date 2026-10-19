@@ -19,6 +19,11 @@ What a rule is:
 cause. `causes`: "weather" (weather, sea state, wind, storms), "safety", or "any" (any \
 cancellation by the operator, e.g. "if we cancel the trip"). Only write a rule for cancellations \
 by the operator, never for cancellations by the guest.
+- `product`: when the wording has separate sections for different products (day trips, \
+liveaboards, courses), the heading of the section the rule is in, copied exactly; otherwise null.
+- A rule needs a cause above: a clause only about other causes (e.g. mechanical issues alone) is \
+not a weather rule. Lists that include a catch-all ("other circumstances", "operational \
+reasons", "force majeure") are "any".
 - `warning`: only when the wording makes the payout conditional on an official warning \
 ("unless there has been an official storm warning issued by ..."). `named_as` is the authority \
 exactly as written. `source` is one of the catalogue sources below if and only if the wording \
@@ -29,7 +34,8 @@ speaks of the trip or the booking.
 - `applies_to`: "both" unless the wording limits the remedy to the deposit or to the balance.
 - `remedies`: one entry per alternative the wording offers. "refund" with the percent refunded; \
 "credit" (credit, voucher, rebooking, rescheduling, moving to another date: all are credit) with \
-the percent credited; "none" with percent 0 when the wording says no refund. Fees the wording \
+the percent credited; "none" with percent 0 when the wording says no refund. "Refunded" or \
+"refund" without a figure means 100. Fees the wording \
 deducts go in `deductions` (a percent or a fixed amount with its label). \
 `credit_expiry_months` only when the wording states it for this credit.
 - `chooser`: with two or more remedies, "guest" when the wording gives the guest the option, \
@@ -43,10 +49,12 @@ passage it is about (`quote`, or null when the wording is silent):
 - "remedy_chooser_unclear": alternatives offered without saying who chooses.
 - "outcome_unspecified": a weather or force-majeure clause that does not say what the guest gets.
 - "operator_discretion": the outcome is left to the operator's discretion or "individual \
-circumstances".
+circumstances", even when a figure is given ("a 25% refund, at the operator's discretion"); \
+write no rule for it.
 - "no_weather_clause": the wording has no clause about cancellation for weather.
 - "conflicting_clauses": two passages give different outcomes for the same cancellation.
 - "credit_expiry_unspecified": a credit remedy with no stated expiry.
+- "deduction_unspecified": the wording deducts costs or fees without stating how much.
 - "other": anything else the wording leaves open about weather cancellations.
 Do not invent rules for what the wording leaves open; ask instead. Do not ask about clauses \
 that only concern cancellations by the guest, no-shows, course failures or fees.

@@ -62,6 +62,7 @@ class Scripted:
 
 def _rule(quote: str, **overrides: Any) -> dict[str, Any]:
     rule: dict[str, Any] = {
+        "product": None,
         "causes": ["weather", "safety"],
         "warning": None,
         "scope": "per_trip",

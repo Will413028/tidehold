@@ -24,6 +24,7 @@ RulingTopic = Literal[
     "no_weather_clause",
     "conflicting_clauses",
     "credit_expiry_unspecified",
+    "deduction_unspecified",
     "span_not_found",
     "other",
 ]
@@ -58,6 +59,9 @@ class WarningCondition(Wire):
 
 
 class Rule(Wire):
+    # The product heading the rule sits under ("Liveaboard Trips"), verbatim; null when the
+    # wording covers one product. A trip binds the rules of its product (step 5).
+    product: str | None
     causes: list[Cause]
     warning: WarningCondition | None
     scope: Scope
@@ -123,6 +127,7 @@ _WARNING = _object(
     quote=_STRING,
 )
 _RULE = _object(
+    product=_nullable(_STRING),
     causes={"type": "array", "items": _enum(_literals(Cause))},
     warning=_nullable(_WARNING),
     scope=_enum(_literals(Scope)),

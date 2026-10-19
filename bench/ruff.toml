@@ -1,0 +1,18 @@
+# The compile benchmark (plan step 2): runs on the backend's environment and imports tidehold.
+line-length = 100
+target-version = "py313"
+
+[lint]
+select = [
+    "E", "W", "F", "I", "B", "UP", "S", "SIM", "RUF", "PGH", "ASYNC", "PT", "TID",
+    "C90", "PLR09", "BLE", "DTZ", "FBT", "TRY", "PLW0603",
+]
+# TRY003: messages at the raise site.
+ignore = ["TRY003"]
+
+[lint.per-file-ignores]
+# S101: assert is how pytest checks.
+"test_*.py" = ["S101"]
+
+[lint.isort]
+known-first-party = ["tidehold", "score"]
