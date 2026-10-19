@@ -250,3 +250,73 @@ async def test_a_provider_failure_is_a_provider_error(answer: httpx.Response, ki
 
     assert raised.value.rate_limited is (kind == "rate limited")
     assert raised.value.transient is (kind in {"rate limited", "transient"})
+
+
+def _gemini_quota(quota_id: str) -> httpx.Response:
+    violation = {"quotaMetric": "generate_content_free_tier_requests", "quotaId": quota_id}
+    error = {"status": "RESOURCE_EXHAUSTED", "details": [{"violations": [violation]}]}
+    return httpx.Response(429, json={"error": error})
+
+
+@pytest.mark.parametrize(
+    ("answer", "named", "daily"),
+    [
+        (
+            _gemini_quota("GenerateRequestsPerDayPerProjectPerModel-FreeTier"),
+            "RESOURCE_EXHAUSTED GenerateRequestsPerDayPerProjectPerModel-FreeTier",
+            True,
+        ),
+        (
+            _gemini_quota("GenerateRequestsPerMinutePerProjectPerModel-FreeTier"),
+            "RESOURCE_EXHAUSTED GenerateRequestsPerMinutePerProjectPerModel-FreeTier",
+            False,
+        ),
+    ],
+)
+async def test_gemini_names_the_spent_quota_and_a_daily_one_is_not_retried(
+    answer: httpx.Response, named: str, *, daily: bool
+) -> None:
+    gemini = Gemini(_recording([], answer), "k", "gemini-3.8-flash")
+
+    with pytest.raises(ProviderError) as raised:
+        await gemini.complete("sys", "user", WIRE_SCHEMA, "x")
+
+    assert raised.value.reason == f"HTTP 429 {named}"
+    assert raised.value.daily is daily
+    assert raised.value.transient is not daily
+
+
+@pytest.mark.parametrize(
+    ("status", "error", "reason", "daily"),
+    [
+        (
+            400,
+            {"code": "json_validate_failed", "message": "Failed", "failed_generation": "{..."},
+            "HTTP 400 json_validate_failed",
+            False,
+        ),
+        (
+            429,
+            {"code": "rate_limit_exceeded", "message": "Limit on tokens per minute (TPM): org_x"},
+            "HTTP 429 rate_limit_exceeded TPM",
+            False,
+        ),
+        (
+            429,
+            {"code": "rate_limit_exceeded", "message": "Limit on requests per day (RPD): org_x"},
+            "HTTP 429 rate_limit_exceeded RPD",
+            True,
+        ),
+    ],
+)
+async def test_groq_errors_keep_the_code_and_limit_but_not_the_message(
+    status: int, error: dict[str, str], reason: str, *, daily: bool
+) -> None:
+    answer = httpx.Response(status, json={"error": error})
+    groq = Groq(_recording([], answer), "k", "openai/gpt-oss-120b")
+
+    with pytest.raises(ProviderError) as raised:
+        await groq.complete("sys", "user", WIRE_SCHEMA, "x")
+
+    assert raised.value.reason == reason
+    assert raised.value.daily is daily

@@ -5,7 +5,8 @@
 
 Keys come from GROQ_API_KEY and GEMINI_API_KEY (`tidehold.platform.settings`; on the VM via
 `--env-file`, D13). Calls are sequential and spaced per provider so the fallback demo sharing
-the keys keeps its quota; a 429 is counted, waited out once, then recorded as a failure. The
+the keys keeps its quota; a per-minute 429 or a 503 is counted, waited out once, then recorded as
+a failure; a spent daily quota fails the model's remaining calls without sending them. The
 compile path is the product's own (`tidehold.policy`), so the prompt hash recorded here is the
 one step 5 ships.
 """
@@ -82,8 +83,13 @@ class Pacer:
     last: float = 0.0
     limits_hit: int = 0
     unavailable: int = 0
+    # Set once a daily quota is spent: the model's remaining calls fail without a request, so
+    # the run measures the quota once instead of spending the shared key's day (D13).
+    exhausted: ProviderError | None = None
 
     async def call(self, make: Callable[[], Awaitable[T]]) -> T:
+        if self.exhausted:
+            raise self.exhausted
         for attempt in range(1, TRIES + 1):
             wait = self.last + self.spacing - time.monotonic()
             if wait > 0:
@@ -92,6 +98,9 @@ class Pacer:
             try:
                 return await make()
             except ProviderError as error:
+                if error.daily:
+                    self.limits_hit += 1
+                    self.exhausted = error
                 if not error.transient or attempt == TRIES:
                     raise
                 if error.rate_limited:
@@ -213,8 +222,10 @@ async def bench(spec: str, runs: int, split: str, keys: ModelKeys) -> list[dict[
                     "prompt_hash": PROMPT_HASH,
                     "labels_version": labels["version"],
                     "started": started.isoformat(),
+                    # cumulative over this model's runs so far
                     "limits_hit": pacer.limits_hit,
                     "unavailable": pacer.unavailable,
+                    "daily_quota_spent": pacer.exhausted is not None,
                     "summary": summarise(labels, outcomes, events),
                     "fixtures": [asdict(o) for o in outcomes],
                     "event_sets": [asdict(e) for e in events],
