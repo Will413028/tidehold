@@ -4,7 +4,7 @@ What tidehold is building, what can go wrong, what we do about it, and how we kn
 
 ## What we are working on
 
-A public demo, reachable without accounts, where a dive operator compiles its cancellation wording into rules, guests pay a deposit and authorize a trip balance through PayPal sandbox, and official weather warnings drive voids, partial captures, refunds or credit inside the operator's mandate.
+A public demo, reachable without accounts, where a dive operator compiles its cancellation wording into rules, guests pay a deposit and authorize a trip balance through PayPal sandbox, and the operator's weather cancellations, checked against official warnings where the policy requires one, drive voids, partial captures, refunds or credit inside the operator's mandate (`docs/adr/2026-10-19-settlement-triggers-and-model-role.md`).
 
 Assets, most valuable first:
 
@@ -47,12 +47,12 @@ Trust boundaries: browser ↔ backend (anonymous cookie session or guest link); 
 | Unbounded consumption of the shared free-tier quota | Daily live-call cap with replay of recorded results; `max_tokens` on every call; a no-AI path where the operator writes rules by hand | Step 5: cap test, fallback test, a test that every call sets `max_tokens`; step 11 on the deployed demo |
 | A provider silently swaps the model behind an alias | Exact model version IDs only; a test fails when the configured model ID or prompt hash differs from the last benchmarked one | Steps 2 and 5 |
 
-### 4. Settlement agent and official feeds
+### 4. Settlement and official feeds
 
 | What can go wrong | Response | Where, and the proof |
 |---|---|---|
-| A crafted or replayed feed triggers payouts | Only CAP warnings from the source the policy names trigger; only `Actual` messages count, and a visible Update or Cancel replaces the messages it references (a Cancel is never evidence itself); Open-Meteo only corroborates; replayed recordings are labelled with their original fetch time | Feed XML is parsed with defusedxml (entities and DTDs refused: `test_untrusted_xml_that_is_not_a_plain_cap_alert_is_refused`); parser tests on recorded PAGASA and NWS samples; `test_exercise_and_test_messages_are_never_evidence`, `test_a_visible_cancel_withdraws_the_warning_and_is_not_evidence_itself` (mutation: drop the status and Cancel filter), `test_an_update_replaces_the_message_it_references`, `test_a_live_update_does_not_hide_a_replay_of_the_message_it_replaced` (mutation: drop the same-timeline condition); a replay is visible only to the workspace that made it (`test_a_replayed_warning_is_seen_only_by_its_workspace_from_its_shifted_time`); step 8 settlement tests |
-| The agent sees evidence from after the decision time | Evidence is filtered by `fetched_at` (or replay-shifted time) before each decision | `test_evidence_fetched_after_the_decision_time_is_invisible` (mutation: drop the time filter) |
+| A crafted or replayed feed triggers payouts | A warning never moves money alone: every settlement starts from an operator cancellation, and a warning condition matches only CAP warnings from the source the policy names, in the operator-confirmed event set; only `Actual` messages count, and a visible Update or Cancel replaces the messages it references (a Cancel is never evidence itself); Open-Meteo only corroborates; replayed recordings are labelled with their original fetch time | Feed XML is parsed with defusedxml (entities and DTDs refused: `test_untrusted_xml_that_is_not_a_plain_cap_alert_is_refused`); parser tests on recorded PAGASA and NWS samples; `test_exercise_and_test_messages_are_never_evidence`, `test_a_visible_cancel_withdraws_the_warning_and_is_not_evidence_itself` (mutation: drop the status and Cancel filter), `test_an_update_replaces_the_message_it_references`, `test_a_live_update_does_not_hide_a_replay_of_the_message_it_replaced` (mutation: drop the same-timeline condition); a replay is visible only to the workspace that made it (`test_a_replayed_warning_is_seen_only_by_its_workspace_from_its_shifted_time`); step 8 settlement tests |
+| A decision sees evidence from after the decision time | Evidence is filtered by `fetched_at` (or replay-shifted time) before each decision | `test_evidence_fetched_after_the_decision_time_is_invisible` (mutation: drop the time filter) |
 | A capture lands outside the authorization's validity | Holds start at T-(29 − N); reauthorize before a capture after the honor period; trips over 10 days refused | Steps 6 and 8: validity test for the longest allowed trip |
 
 ## Personal data inventory
