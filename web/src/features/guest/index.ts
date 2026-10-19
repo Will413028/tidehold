@@ -1,2 +1,2 @@
-export { fetchGuestTrip } from "./api";
+export { fetchGuestView } from "./api";
 export { GuestTrip } from "./GuestTrip";

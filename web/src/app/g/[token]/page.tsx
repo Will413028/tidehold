@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
-import { fetchGuestTrip, GuestTrip } from "@/features/guest";
+import { fetchGuestView, GuestTrip } from "@/features/guest";
 
 export default async function GuestPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const trip = await fetchGuestTrip(token);
-  if (trip === null) notFound();
-  return <GuestTrip trip={trip} />;
+  const view = await fetchGuestView(token);
+  if (view === null) notFound();
+  return <GuestTrip token={token} view={view} />;
 }

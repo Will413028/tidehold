@@ -1,1 +1,1 @@
-export { CreateTrip } from "./CreateTrip";
+export { OperatorConsole } from "./OperatorConsole";

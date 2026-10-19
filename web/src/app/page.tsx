@@ -1,5 +1,5 @@
-import { CreateTrip } from "@/features/operator";
+import { OperatorConsole } from "@/features/operator";
 
 export default function OperatorHome() {
-  return <CreateTrip />;
+  return <OperatorConsole />;
 }
