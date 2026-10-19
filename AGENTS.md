@@ -41,6 +41,8 @@ Web (`web/src/`): `app` → `features` → `lib`. A feature does not import anot
 - `quality-lock.json` locks every kind of suppression comment (`noqa`, `ruff: ignore`, `type: ignore`, `biome-ignore`, `ts-expect-error`, ...) and the executed test count per suite; `make locks` fails on any difference, so lower a suppression count or raise a test count in the change that earns it. A commit that raises a suppression count or lowers a test count needs a `Quality-lock-reason:` line in its message (checked on pre-push and in CI); list the tests removed with a deleted feature there. Fix new violations instead of suppressing them; the 13 `noqa` in `recorder/` are the baseline.
 - Commits go straight to `main`. The gate is the lefthook `pre-push` hook, which runs `make check`, `make security` and the lock history check; run `lefthook install` once per clone. CI (`.github/workflows/ci.yml`) runs the same targets as a backup; `osv-weekly.yml` rescans `main` weekly.
 - GitHub Actions are pinned by full commit SHA (images by digest) with the version in a comment; workflows default to `permissions: contents: read`.
+- `make coverage`: line and branch coverage of `money`, `holds` and `settlement`, report only (no threshold); read it at each step's acceptance.
+- `docs/threat-model.md` lists every security control with the test that proves it; change it in the same commit as the surface it describes.
 - Local dev: `make dev-db`, `make dev-backend`, `make dev-web`.
 
 ## Dependencies
