@@ -88,8 +88,9 @@ class FakePayPal:
             "status": "CREATED",
         }
         self.orders[order["id"]] = order
-        if "payment_source" not in body:
-            return httpx.Response(201, json=order)
+        if "card" not in body.get("payment_source", {}):
+            links = [{"rel": "payer-action", "href": f"https://sandbox.example/{order['id']}"}]
+            return httpx.Response(201, json={**order, "links": links})
         if body["intent"] == "CAPTURE":
             return httpx.Response(201, json=_with(order, "captures", _capture(unit["amount"])))
         return httpx.Response(201, json=_with(order, "authorizations", self._auth(order)))

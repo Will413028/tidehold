@@ -34,6 +34,7 @@ from tidehold.money.paypal import (
     Authorization,
     PayPalClient,
     PayPalError,
+    PayPalRedirect,
     PayPalUnknownOutcome,
     authorization_of,
     order_id_of,
@@ -43,6 +44,8 @@ from tidehold.platform.migrate import migrate
 from tidehold.platform.settings import database_url_from_env, paypal_from_env
 
 SMOKE_CAP = 10
+# Where PayPal sends the sandbox buyer after approving; nothing needs to answer there.
+RETURN_URL = "https://example.com/tidehold-sandbox-approved"
 AMOUNT = 3000  # USD 30.00
 
 
@@ -109,7 +112,7 @@ async def reauth_create(client: PayPalClient, path: Path) -> dict[str, Any]:
                 invoice_id=_key(state, path, f"{card}-invoice"),
                 amount_minor=AMOUNT,
                 request_id=_key(state, path, card),
-                card=TEST_CARD,
+                source=TEST_CARD,
             )
             auth = authorization_of(order)
             state[card] = {
@@ -125,11 +128,12 @@ async def reauth_create(client: PayPalClient, path: Path) -> dict[str, Any]:
             invoice_id=_key(state, path, "paypal_account-invoice"),
             amount_minor=AMOUNT,
             request_id=_key(state, path, "paypal_account"),
+            source=PayPalRedirect(RETURN_URL),
         )
-        order_id = order_id_of(order)
+        links = {link.get("rel"): link.get("href") for link in order.get("links", [])}
         state["paypal_account"] = {
-            "order_id": order_id,
-            "approve_url": f"https://www.sandbox.paypal.com/checkoutnow?token={order_id}",
+            "order_id": order_id_of(order),
+            "approve_url": links.get("payer-action") or links.get("approve"),
             "created_at": _now(),
         }
         _save(path, state)

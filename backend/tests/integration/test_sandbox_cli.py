@@ -28,6 +28,7 @@ async def test_the_reauthorization_check_keeps_its_state_between_days(tmp_path: 
     await sandbox.reauth_day4(fake.client(), state)
 
     saved = json.loads(state.read_text())
+    assert saved["paypal_account"]["approve_url"].endswith(saved["paypal_account"]["order_id"])
     assert len([c for c in fake.calls if c == "POST /v2/checkout/orders"]) == 3
     assert [(r["step"], r["result"]) for r in saved["day4"]] == [
         ("card_reauthorize-reauthorize", "accepted"),

@@ -48,7 +48,7 @@ async def _open(
             invoice_id=command["invoice_id"],
             amount_minor=command["amount_minor"],
             request_id=command["request_id"],
-            card=card,
+            source=card,
         )
     else:
         raise Conflict("PAYMENT_CARD_REQUIRED")

@@ -60,6 +60,14 @@ TEST_CARD = SandboxCard("4111111111111111", "2030-12", "123", "Sandbox Guest")
 
 
 @dataclass(frozen=True)
+class PayPalRedirect:
+    """The buyer approves on PayPal's own page, which then returns to `return_url`; an order
+    approved this way needs it (the JS SDK buttons of step 6 approve without a redirect)."""
+
+    return_url: str
+
+
+@dataclass(frozen=True)
 class Authorization:
     authorization_id: str
     status: str
@@ -184,24 +192,31 @@ class PayPalClient:
         invoice_id: str,
         amount_minor: int,
         request_id: str,
-        card: SandboxCard | None = None,
+        source: SandboxCard | PayPalRedirect | None = None,
     ) -> dict[str, Any]:
-        """Without a card, an order the buyer approves in PayPal's checkout (no money moves
-        until we capture or authorize it). With the server's sandbox card, PayPal processes
-        the order at once: the answer carries the capture or the authorization."""
+        """Without a source, an order the buyer approves in PayPal's checkout buttons; with a
+        redirect, one approved on PayPal's page. No money moves until we capture or authorize
+        it. With the server's sandbox card, PayPal processes the order at once: the answer
+        carries the capture or the authorization."""
         body: dict[str, Any] = {
             "intent": intent,
             "purchase_units": [{"invoice_id": invoice_id, "amount": usd(amount_minor)}],
         }
-        if card is not None:
-            body["payment_source"] = {
-                "card": {
-                    "number": card.number,
-                    "expiry": card.expiry,
-                    "security_code": card.security_code,
-                    "name": card.name,
+        match source:
+            case SandboxCard():
+                body["payment_source"] = {
+                    "card": {
+                        "number": source.number,
+                        "expiry": source.expiry,
+                        "security_code": source.security_code,
+                        "name": source.name,
+                    }
                 }
-            }
+            case PayPalRedirect():
+                context = {"return_url": source.return_url, "cancel_url": source.return_url}
+                body["payment_source"] = {"paypal": {"experience_context": context}}
+            case None:
+                pass
         return await self._call("POST", "/v2/checkout/orders", body, request_id)
 
     async def capture_order(self, order_id: str, *, request_id: str) -> dict[str, Any]:
