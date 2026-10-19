@@ -27,7 +27,9 @@ ORIGIN = "http://test"
 
 def _truncate(database_url: str) -> None:
     with psycopg.connect(database_url) as conn:
-        conn.execute("truncate payment_events, money_commands, payments, trips, workspaces")
+        conn.execute(
+            "truncate due_actions, payment_events, money_commands, payments, trips, workspaces"
+        )
 
 
 @pytest.fixture

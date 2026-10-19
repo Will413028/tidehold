@@ -12,7 +12,7 @@
   },
   "tests": {
     "backend-unit": 24,
-    "backend-integration": 36,
+    "backend-integration": 41,
     "web": 3,
     "recorder": 9,
     "scripts": 7
