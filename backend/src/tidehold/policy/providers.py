@@ -35,7 +35,12 @@ class ProviderError(Exception):
 
     @property
     def rate_limited(self) -> bool:
-        return self.status == 429
+        return self.status == httpx.codes.TOO_MANY_REQUESTS
+
+    @property
+    def transient(self) -> bool:
+        """Worth one retry after a pause: a rate limit or an overloaded model (503)."""
+        return self.rate_limited or self.status == httpx.codes.SERVICE_UNAVAILABLE
 
 
 class Provider(Protocol):

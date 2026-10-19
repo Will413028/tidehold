@@ -232,6 +232,7 @@ async def test_gemini_calls_cap_tokens_and_send_the_schema() -> None:
     ("answer", "kind"),
     [
         (httpx.Response(429, json={}), "rate limited"),
+        (httpx.Response(503, json={}), "transient"),
         (httpx.Response(500, json={}), "error"),
         (
             httpx.Response(
@@ -248,3 +249,4 @@ async def test_a_provider_failure_is_a_provider_error(answer: httpx.Response, ki
         await groq.complete("sys", "user", WIRE_SCHEMA, "x")
 
     assert raised.value.rate_limited is (kind == "rate limited")
+    assert raised.value.transient is (kind in {"rate limited", "transient"})

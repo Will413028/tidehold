@@ -44,7 +44,7 @@ CANDIDATES = (
 # for the fallback demo (Groq 30 requests/min, Gemini flash 10/min, read 2026-10-19).
 SPACING = {"groq": 4.0, "gemini": 10.0}
 RATE_LIMIT_WAIT_S = 65.0
-# One call and, after a 429, one more once the minute has passed.
+# One call and, after a 429 or a 503, one more once the minute has passed.
 TRIES = 2
 SOURCES = ["pagasa", "nws", "meteoalarm"]
 
@@ -81,6 +81,7 @@ class Pacer:
     spacing: float
     last: float = 0.0
     limits_hit: int = 0
+    unavailable: int = 0
 
     async def call(self, make: Callable[[], Awaitable[T]]) -> T:
         for attempt in range(1, TRIES + 1):
@@ -91,9 +92,12 @@ class Pacer:
             try:
                 return await make()
             except ProviderError as error:
-                if not error.rate_limited or attempt == TRIES:
+                if not error.transient or attempt == TRIES:
                     raise
-                self.limits_hit += 1
+                if error.rate_limited:
+                    self.limits_hit += 1
+                else:
+                    self.unavailable += 1
                 await asyncio.sleep(RATE_LIMIT_WAIT_S)
         raise AssertionError("unreachable")
 
@@ -210,6 +214,7 @@ async def bench(spec: str, runs: int, split: str, keys: ModelKeys) -> list[dict[
                     "labels_version": labels["version"],
                     "started": started.isoformat(),
                     "limits_hit": pacer.limits_hit,
+                    "unavailable": pacer.unavailable,
                     "summary": summarise(labels, outcomes, events),
                     "fixtures": [asdict(o) for o in outcomes],
                     "event_sets": [asdict(e) for e in events],
