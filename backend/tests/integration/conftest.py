@@ -9,6 +9,7 @@ from httpx import ASGITransport, AsyncClient
 from testcontainers.community.postgres import PostgresContainer
 
 from tidehold.bootstrap.app import create_app
+from tidehold.platform.db import Conn, connect
 from tidehold.platform.migrate import migrate
 from tidehold.platform.settings import Settings
 
@@ -24,11 +25,23 @@ def database_url() -> Iterator[str]:
 ORIGIN = "http://test"
 
 
+def _truncate(database_url: str) -> None:
+    with psycopg.connect(database_url) as conn:
+        conn.execute("truncate payment_events, money_commands, payments, trips, workspaces")
+
+
 @pytest.fixture
 def app(database_url: str) -> Iterator[FastAPI]:
     yield create_app(Settings(database_url=database_url, public_origin=ORIGIN))
-    with psycopg.connect(database_url) as conn:
-        conn.execute("truncate trips, workspaces")
+    _truncate(database_url)
+
+
+@pytest.fixture
+async def conn(database_url: str) -> AsyncIterator[Conn]:
+    """An application connection (autocommit), for module-level tests below HTTP."""
+    async with await connect(database_url) as c:
+        yield c
+    _truncate(database_url)
 
 
 def _client(app: FastAPI) -> AsyncClient:
