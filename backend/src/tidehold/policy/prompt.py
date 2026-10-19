@@ -1,0 +1,81 @@
+"""Prompts for compiling cancellation wording and for proposing a warning condition's event set.
+
+`PROMPT_HASH` covers both prompts and both schemas; the benchmark records it with every run and
+a test fails when it drifts from the last benchmarked value (plan steps 2 and 5, D15).
+"""
+
+import hashlib
+import json
+
+from tidehold.policy.schema import EVENT_SET_SCHEMA, WIRE_SCHEMA
+
+COMPILE = """\
+You turn a dive operator's own cancellation wording into structured rules for weather \
+cancellations. Your output is checked by code and confirmed by the operator; you never decide \
+money and you never state an amount.
+
+What a rule is:
+- A rule says what a guest receives when the OPERATOR cancels a trip day or the whole trip for a \
+cause. `causes`: "weather" (weather, sea state, wind, storms), "safety", or "any" (any \
+cancellation by the operator, e.g. "if we cancel the trip"). Only write a rule for cancellations \
+by the operator, never for cancellations by the guest.
+- `warning`: only when the wording makes the payout conditional on an official warning \
+("unless there has been an official storm warning issued by ..."). `named_as` is the authority \
+exactly as written. `source` is one of the catalogue sources below if and only if the wording \
+names that service; otherwise null. `event_values` stays empty: event values are chosen later \
+with the operator.
+- `scope`: "per_day" when the wording speaks of a dive, an activity or a day; "per_trip" when it \
+speaks of the trip or the booking.
+- `applies_to`: "both" unless the wording limits the remedy to the deposit or to the balance.
+- `remedies`: one entry per alternative the wording offers. "refund" with the percent refunded; \
+"credit" (credit, voucher, rebooking, rescheduling, moving to another date: all are credit) with \
+the percent credited; "none" with percent 0 when the wording says no refund. Fees the wording \
+deducts go in `deductions` (a percent or a fixed amount with its label). \
+`credit_expiry_months` only when the wording states it for this credit.
+- `chooser`: with two or more remedies, "guest" when the wording gives the guest the option, \
+"operator" when the operator decides; null otherwise.
+- `quote`: the shortest passage of the wording that states the rule, copied exactly, character \
+for character. Never paraphrase, never join separate passages.
+
+What needs a ruling (`needs_ruling`), each with a short question for the operator and the exact \
+passage it is about (`quote`, or null when the wording is silent):
+- "warning_source_unnamed": a warning condition that names no service from the catalogue.
+- "remedy_chooser_unclear": alternatives offered without saying who chooses.
+- "outcome_unspecified": a weather or force-majeure clause that does not say what the guest gets.
+- "operator_discretion": the outcome is left to the operator's discretion or "individual \
+circumstances".
+- "no_weather_clause": the wording has no clause about cancellation for weather.
+- "conflicting_clauses": two passages give different outcomes for the same cancellation.
+- "credit_expiry_unspecified": a credit remedy with no stated expiry.
+- "other": anything else the wording leaves open about weather cancellations.
+Do not invent rules for what the wording leaves open; ask instead. Do not ask about clauses \
+that only concern cancellations by the guest, no-shows, course failures or fees.
+
+Catalogue sources: {sources}.
+"""
+
+EVENT_SET = """\
+An operator's cancellation rule requires an official warning, and the operator has said which \
+weather service issues it. Choose the event values from that service's catalogue that the \
+wording covers. Use only values from the catalogue, spelled exactly as listed. "X or stronger" \
+means X and every more severe value of the same hazard; the catalogue lists each hazard from \
+least to most severe. Return an empty list when nothing in the catalogue fits.
+
+Service: {source}
+Catalogue (by hazard, least to most severe, then other values):
+{catalogue}
+"""
+
+
+def compile_prompt(sources: list[str]) -> str:
+    return COMPILE.format(sources=", ".join(sources))
+
+
+def event_set_prompt(source: str, catalogue: list[list[str]]) -> str:
+    lines = "\n".join(" < ".join(group) for group in catalogue)
+    return EVENT_SET.format(source=source, catalogue=lines)
+
+
+PROMPT_HASH = hashlib.sha256(
+    json.dumps([COMPILE, EVENT_SET, WIRE_SCHEMA, EVENT_SET_SCHEMA], sort_keys=True).encode()
+).hexdigest()[:16]

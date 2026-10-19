@@ -43,6 +43,22 @@ def paypal_from_env() -> PayPalCredentials:
     return PayPalCredentials(os.environ["PAYPAL_CLIENT_ID"], os.environ["PAYPAL_CLIENT_SECRET"])
 
 
+@dataclass(frozen=True)
+class ModelKeys:
+    """Provider keys for the policy compiler; either may be absent (D13: shared with the
+    fallback demo's key file, passed with `--env-file`, never read by an agent)."""
+
+    groq: str | None = field(default=None, repr=False)
+    gemini: str | None = field(default=None, repr=False)
+
+
+def model_keys_from_env() -> ModelKeys:
+    return ModelKeys(
+        groq=os.environ.get("GROQ_API_KEY") or None,
+        gemini=os.environ.get("GEMINI_API_KEY") or None,
+    )
+
+
 def database_url_from_env() -> str:
     """What the migration command needs, without the web settings."""
     return os.environ["DATABASE_URL"]
