@@ -10,6 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from tidehold.platform.db import Conn, connection, insert_returning
 
 COOKIE = "tidehold_session"
+# The server-side expiry (migration 0002) matches the cookie's lifetime.
+SESSION_SECONDS = 60 * 60 * 24 * 30
 
 router = APIRouter(prefix="/api/workspaces")
 
@@ -24,7 +26,9 @@ async def current_workspace(request: Request, conn: Annotated[Conn, Depends(conn
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "no workspace session")
     row = await (
         await conn.execute(
-            "select id from workspaces where session_token_hash = %s", (_hash(token),)
+            "select id from workspaces"
+            " where session_token_hash = %s and session_expires_at > now()",
+            (_hash(token),),
         )
     ).fetchone()
     if row is None:
@@ -49,9 +53,23 @@ async def create_workspace(
         httponly=True,
         samesite="lax",
         secure=request.app.state.settings.cookie_secure,
-        max_age=60 * 60 * 24 * 30,
+        max_age=SESSION_SECONDS,
     )
     return {"id": str(row["id"])}
+
+
+@router.post("/leave", status_code=status.HTTP_204_NO_CONTENT)
+async def leave_workspace(
+    response: Response,
+    workspace_id: Annotated[UUID, Depends(current_workspace)],
+    conn: Annotated[Conn, Depends(connection)],
+) -> None:
+    """Forget this browser's session: the stored hash is cleared, so the cookie is dead
+    even if a copy of it survives elsewhere."""
+    await conn.execute(
+        "update workspaces set session_token_hash = null where id = %s", (workspace_id,)
+    )
+    response.delete_cookie(COOKIE)
 
 
 @router.get("/me")
