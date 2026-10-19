@@ -1,11 +1,11 @@
 from collections.abc import Awaitable, Callable
-from pathlib import Path
 
 import pytest
 from fastapi import APIRouter, FastAPI
+from fastapi.dependencies.models import Dependant
+from fastapi.routing import APIRoute, iter_route_contexts
 from httpx import AsyncClient
 
-import tidehold
 from tidehold.bootstrap.app import create_app
 from tidehold.bootstrap.routes import Access
 from tidehold.platform.settings import Settings
@@ -13,26 +13,38 @@ from tidehold.platform.settings import Settings
 TRIP = {"name": "Anilao weekend", "starts_on": "2026-12-05", "days": 3}
 
 
-def _operations(app: FastAPI) -> list[tuple[str, str, list[str], list[str]]]:
-    """(method, path, tags, path parameters) of every route, read from the OpenAPI schema,
-    the public view of routes inside included routers."""
-    app.openapi_schema = None
+def _operations(app: FastAPI) -> list[tuple[str, str, list[str], list[str], set[str]]]:
+    """(method, path, tags, path parameters, dependency names) of every API route, through
+    FastAPI's public walker: included routers are lazy since 0.137, so `app.routes` alone
+    misses them (second-brain wiki/tech/fastapi-included-router-route-walking)."""
     return [
         (
-            method.upper(),
-            path,
-            op.get("tags", []),
-            [p["name"] for p in op.get("parameters", []) if p["in"] == "path"],
+            method,
+            str(context.path),
+            [str(t) for t in context.tags],
+            [p.name for p in context.dependant.path_params],
+            _dependency_names(context.dependant),
         )
-        for path, ops in app.openapi()["paths"].items()
-        for method, op in ops.items()
+        for context in iter_route_contexts(app.routes)
+        if isinstance(context.original_route, APIRoute)
+        for method in sorted(context.methods or ())
     ]
+
+
+def _dependency_names(dependant: Dependant) -> set[str]:
+    names: set[str] = set()
+    for sub in dependant.dependencies:
+        names.add(getattr(sub.call, "__name__", ""))
+        names |= _dependency_names(sub)
+    return names
 
 
 def unclassified(app: FastAPI) -> list[str]:
     """Routes not mounted through exactly one access class of the route table."""
     classes = {a.value for a in Access}
-    return [path for _, path, tags, _ in _operations(app) if len(classes.intersection(tags)) != 1]
+    return [
+        path for _, path, tags, _, _ in _operations(app) if len(classes.intersection(tags)) != 1
+    ]
 
 
 def _app() -> FastAPI:
@@ -42,7 +54,7 @@ def _app() -> FastAPI:
 def _id_bearing_workspace_routes() -> list[tuple[str, str, tuple[str, ...]]]:
     return sorted(
         (method, path, tuple(params))
-        for method, path, tags, params in _operations(_app())
+        for method, path, tags, params, _ in _operations(_app())
         if Access.WORKSPACE in tags and params
     )
 
@@ -81,9 +93,19 @@ def test_the_cross_workspace_check_covers_some_routes() -> None:
     assert ROUTES
 
 
-def test_no_route_hides_from_the_schema_the_table_check_reads() -> None:
-    sources = Path(tidehold.__file__).parent.rglob("*.py")
-    assert [p.name for p in sources if "include_in_schema" in p.read_text()] == []
+def test_exactly_the_workspace_routes_check_the_session() -> None:
+    checked = {
+        (method, path): "current_workspace" in deps
+        for method, path, tags, _, deps in _operations(_app())
+    }
+    workspace = {
+        (method, path)
+        for method, path, tags, _, _ in _operations(_app())
+        if Access.WORKSPACE in tags
+    }
+
+    assert workspace
+    assert {route for route, has in checked.items() if has} == workspace
 
 
 @pytest.mark.parametrize(("method", "path", "params"), ROUTES)
