@@ -1,7 +1,8 @@
 """Money command execution: store, call PayPal outside any transaction, then settle.
 
 Ported from dive-trip-agent@8065eba `modules/deposits/service.py`. A command commits as
-`pending` before PayPal is called. A refusal closes it; an unknown outcome leaves it open,
+`pending` before PayPal is called. A refusal of its first send closes it; an unknown outcome,
+or a refusal of a resend, leaves it open,
 and `reconcile` resends it with the same request id so PayPal returns the original result
 instead of moving money again. Who calls `reconcile` and when: the due action of plan step 6
 and the nightly job of step 10.
@@ -77,7 +78,6 @@ async def send(
             capture = await client.capture(
                 target,
                 amount_minor=amount,
-                final=command["final_capture"],
                 invoice_id=command["invoice_id"],
                 request_id=key,
             )
@@ -118,9 +118,14 @@ async def execute(
             await commands.complete(conn, command_id, "unknown", error_code=error.code)
         return "unknown"
     except PayPalError as error:
+        # A refusal of the first send means no money moved. A refusal of a resend may mean
+        # the first send took effect (the request id expired, or PayPal says the hold is
+        # already captured), so the command stays open and keeps its key; step 8 turns a
+        # command that stays open into an operator ask.
+        status: commands.Status = "unknown" if command["resend"] else "rejected"
         async with conn.transaction():
-            await commands.complete(conn, command_id, "rejected", error_code=error.code)
-        return "rejected"
+            await commands.complete(conn, command_id, status, error_code=error.code)
+        return status
     async with conn.transaction():
         await commands.complete(conn, command_id, "succeeded", result=result)
     return "succeeded"

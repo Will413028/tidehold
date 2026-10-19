@@ -31,6 +31,11 @@ async def test_the_reauthorization_check_keeps_its_state_between_days(tmp_path: 
     assert len([c for c in fake.calls if c == "POST /v2/checkout/orders"]) == 3
     assert [(r["step"], r["result"]) for r in saved["day4"]] == [
         ("card_reauthorize-reauthorize", "accepted"),
+        ("card_reauthorize-capture", "accepted"),
         ("paypal_account-reauthorize", "accepted"),
+        ("paypal_account-capture", "accepted"),
         ("card_capture_only-capture", "accepted"),
     ]
+    renewed = saved["card_reauthorize"]["reauthorized_id"]
+    assert renewed != saved["card_reauthorize"]["authorization_id"]
+    assert f"POST /v2/payments/authorizations/{renewed}/capture" in fake.calls

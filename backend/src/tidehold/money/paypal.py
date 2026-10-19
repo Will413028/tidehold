@@ -1,7 +1,7 @@
 """PayPal Orders v2 / Payments v2 client, pinned to the sandbox.
 
 Ported from dive-trip-agent@8065eba `modules/deposits/paypal.py`; tidehold adds CAPTURE
-orders (the booking deposit, D3), reauthorization (D11) and order lookup for reconciling.
+orders (the booking deposit, D3) and reauthorization (D11).
 
 Every write carries a caller-supplied PayPal-Request-Id, so a retry with the same key
 returns the original result instead of moving money twice. Transport errors, 5xx answers
@@ -215,14 +215,14 @@ class PayPalClient:
         authorization_id: str,
         *,
         amount_minor: int,
-        final: bool,
         invoice_id: str,
         request_id: str,
     ) -> Capture:
         capture = await self._call(
             "POST",
             f"/v2/payments/authorizations/{authorization_id}/capture",
-            {"amount": usd(amount_minor), "final_capture": final, "invoice_id": invoice_id},
+            # Always final (D11: balance money moves once); the rest of the hold is released.
+            {"amount": usd(amount_minor), "final_capture": True, "invoice_id": invoice_id},
             request_id,
         )
         with answered("PAYPAL_CAPTURE_UNEXPECTED"):
@@ -261,15 +261,6 @@ class PayPalClient:
         )
         with answered("PAYPAL_REFUND_UNEXPECTED"):
             return Refund(str(refund["id"]), str(refund["status"]), minor_of(refund["amount"]))
-
-    async def get_order(self, order_id: str) -> dict[str, Any]:
-        return await self._call("GET", f"/v2/checkout/orders/{order_id}")
-
-    async def get_authorization(self, authorization_id: str) -> dict[str, Any]:
-        return await self._call("GET", f"/v2/payments/authorizations/{authorization_id}")
-
-    async def get_capture(self, capture_id: str) -> dict[str, Any]:
-        return await self._call("GET", f"/v2/payments/captures/{capture_id}")
 
 
 def order_id_of(order: dict[str, Any]) -> str:

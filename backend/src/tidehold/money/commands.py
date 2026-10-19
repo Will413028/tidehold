@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
-from tidehold.platform.db import Conn
+from tidehold.platform.db import Conn, insert_returning
 from tidehold.platform.errors import Conflict, LimitReached, NotFound
 
 Purpose = Literal["deposit", "balance"]
@@ -54,15 +54,12 @@ async def append(conn: Conn, payment_id: UUID, kind: str, detail: dict[str, Any]
 async def create_payment(
     conn: Conn, *, workspace_id: UUID, purpose: Purpose, amount_minor: int
 ) -> UUID:
-    row = await (
-        await conn.execute(
-            "insert into payments (workspace_id, purpose, amount_minor) values (%s, %s, %s)"
-            " returning id",
-            (workspace_id, purpose, amount_minor),
-        )
-    ).fetchone()
-    if row is None:
-        raise RuntimeError("INSERT ... RETURNING returned no row")
+    row = await insert_returning(
+        conn,
+        "insert into payments (workspace_id, purpose, amount_minor) values (%s, %s, %s)"
+        " returning id",
+        (workspace_id, purpose, amount_minor),
+    )
     payment_id: UUID = row["id"]
     await append(conn, payment_id, "payment_created", {"purpose": purpose, "amount": amount_minor})
     return payment_id
@@ -87,32 +84,26 @@ class NewCommand:
     amount_minor: int
     method: Method | None = None
     target_id: str | None = None
-    final_capture: bool = False
 
 
 async def _insert(conn: Conn, new: NewCommand) -> DictRow:
     command_id = uuid4()
-    row = await (
-        await conn.execute(
-            "insert into money_commands (id, payment_id, kind, method, target_id, amount_minor,"
-            " final_capture, request_id, invoice_id, status)"
-            " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending') returning *",
-            (
-                command_id,
-                new.payment_id,
-                new.kind,
-                new.method,
-                new.target_id,
-                new.amount_minor,
-                new.final_capture,
-                request_id(new.kind, command_id),
-                invoice_id(command_id),
-            ),
-        )
-    ).fetchone()
-    if row is None:
-        raise RuntimeError("INSERT ... RETURNING returned no row")
-    return row
+    return await insert_returning(
+        conn,
+        "insert into money_commands (id, payment_id, kind, method, target_id, amount_minor,"
+        " request_id, invoice_id, status)"
+        " values (%s, %s, %s, %s, %s, %s, %s, %s, 'pending') returning *",
+        (
+            command_id,
+            new.payment_id,
+            new.kind,
+            new.method,
+            new.target_id,
+            new.amount_minor,
+            request_id(new.kind, command_id),
+            invoice_id(command_id),
+        ),
+    )
 
 
 async def _within_daily_cap(conn: Conn, workspace_id: UUID, cap: int) -> None:
@@ -197,9 +188,7 @@ async def checkout_attempt(conn: Conn, payment_id: UUID, order_id: str) -> UUID:
     return command_id
 
 
-async def record_command(
-    conn: Conn, payment_id: UUID, kind: Kind, *, amount_minor: int, final_capture: bool = False
-) -> DictRow:
+async def record_command(conn: Conn, payment_id: UUID, kind: Kind, *, amount_minor: int) -> DictRow:
     """Record a follow-up command against what the payment placed; the unique index refuses
     a second live command of the same step."""
     if kind == "open":
@@ -215,17 +204,19 @@ async def record_command(
             kind,
             amount_minor,
             target_id=current[TARGET_OF[kind]],
-            final_capture=final_capture,
         ),
     )
 
 
 async def claim(conn: Conn, command_id: UUID) -> DictRow:
-    """Mark an open command as sent, so no newer attempt can replace it."""
+    """Mark an open command as sent, so no newer attempt can replace it. `resend` says
+    whether it went to PayPal before, whose answer then cannot prove that no money moved."""
     row = await (
         await conn.execute(
-            "update money_commands set sent_at = coalesce(sent_at, now())"
-            " where id = %s and status in ('pending', 'unknown') returning *",
+            "with prior as (select id, sent_at from money_commands where id = %s for update)"
+            " update money_commands c set sent_at = coalesce(c.sent_at, now()) from prior"
+            " where c.id = prior.id and c.status in ('pending', 'unknown')"
+            " returning c.*, prior.sent_at is not null as resend",
             (command_id,),
         )
     ).fetchone()

@@ -17,10 +17,9 @@ STATUS_OF: dict[type[DomainError], int] = {
 async def domain_error(_: Request, error: Exception) -> JSONResponse:
     if not isinstance(error, DomainError):
         raise error
-    code = next(
-        (s for kind, s in STATUS_OF.items() if isinstance(error, kind)),
-        status.HTTP_400_BAD_REQUEST,
-    )
+    code = next((s for kind, s in STATUS_OF.items() if isinstance(error, kind)), None)
+    if code is None:  # an error no caller can act on: do not leak its code
+        return JSONResponse({"detail": "INTERNAL_ERROR"}, status_code=500)
     return JSONResponse({"detail": error.code}, status_code=code)
 
 

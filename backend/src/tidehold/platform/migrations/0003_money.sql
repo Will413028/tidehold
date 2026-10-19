@@ -37,7 +37,6 @@ create table money_commands (
     order_id text check (order_id ~ '^[A-Z0-9]{8,32}$'),
     target_id text,
     amount_minor integer not null check (amount_minor >= 0),
-    final_capture boolean not null default false,
     request_id text not null unique check (length(request_id) between 8 and 108),
     invoice_id text not null unique check (length(invoice_id) between 8 and 127),
     status text not null check (status in ('pending', 'succeeded', 'rejected', 'unknown')),
@@ -56,11 +55,17 @@ create table money_commands (
 );
 
 -- One live (non-rejected) command per payment and step: one open attempt at a time, one
--- reauthorization (PayPal allows one from day 4 to 29), one refund, and one closing command
--- per hold: a capture or a void, never both (D11 moves balance money once).
+-- refund (a deposit is refunded once, D3), and one closing command per hold: a capture or
+-- a void, never both (D11 moves balance money once; every capture is final).
 create unique index money_commands_once on money_commands
     (payment_id, (case when kind in ('capture', 'void') then 'close' else kind end))
-    where status <> 'rejected';
+    where status <> 'rejected' and kind <> 'reauthorize';
+
+-- PayPal's payments v2 reference says both "multiple re-authorizations" and "only once" from
+-- day 4 to 29 (schema read 2026-10-19; the step-4 sandbox check measures it), so only one
+-- reauthorization may be in flight at a time, not one in total.
+create unique index money_commands_one_reauthorization_in_flight on money_commands (payment_id)
+    where kind = 'reauthorize' and status in ('pending', 'unknown');
 
 create index money_commands_open on money_commands (payment_id) where status in ('pending', 'unknown');
 

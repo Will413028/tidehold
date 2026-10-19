@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from tidehold.platform.db import Conn, connection, insert_returning
 
 COOKIE = "tidehold_session"
-# The server-side expiry (migration 0002) matches the cookie's lifetime.
+# The cookie's lifetime and the server-side expiry stored with the session.
 SESSION_SECONDS = 60 * 60 * 24 * 30
 
 # Creating a workspace needs no session; everything else on it does.
@@ -39,16 +39,24 @@ async def current_workspace(request: Request, conn: Annotated[Conn, Depends(conn
     return workspace_id
 
 
+async def new_workspace(conn: Conn) -> tuple[UUID, str]:
+    """A workspace and the session token for its cookie; only the token's hash is stored."""
+    token = secrets.token_urlsafe(32)
+    row = await insert_returning(
+        conn,
+        "insert into workspaces (session_token_hash, session_expires_at)"
+        " values (%s, now() + make_interval(secs => %s)) returning id",
+        (_hash(token), SESSION_SECONDS),
+    )
+    workspace_id: UUID = row["id"]
+    return workspace_id, token
+
+
 @public_router.post("", status_code=status.HTTP_201_CREATED)
 async def create_workspace(
     request: Request, response: Response, conn: Annotated[Conn, Depends(connection)]
 ) -> dict[str, str]:
-    token = secrets.token_urlsafe(32)
-    row = await insert_returning(
-        conn,
-        "insert into workspaces (session_token_hash) values (%s) returning id",
-        (_hash(token),),
-    )
+    workspace_id, token = await new_workspace(conn)
     response.set_cookie(
         COOKIE,
         token,
@@ -57,7 +65,7 @@ async def create_workspace(
         secure=request.app.state.settings.cookie_secure,
         max_age=SESSION_SECONDS,
     )
-    return {"id": str(row["id"])}
+    return {"id": str(workspace_id)}
 
 
 @router.post("/leave", status_code=status.HTTP_204_NO_CONTENT)

@@ -11,6 +11,7 @@ import psycopg
 import pytest
 
 from tests.integration.fake_paypal import FakePayPal
+from tidehold.identity.sessions import new_workspace
 from tidehold.money import commands, service
 from tidehold.money.commands import Purpose
 from tidehold.money.paypal import TEST_CARD, PayPalUnknownOutcome
@@ -21,14 +22,7 @@ CAP = 30
 
 
 async def _workspace(conn: Conn) -> UUID:
-    row = await (
-        await conn.execute(
-            "insert into workspaces (session_token_hash)"
-            " values (sha256(gen_random_uuid()::text::bytea)) returning id"
-        )
-    ).fetchone()
-    assert row is not None
-    workspace_id: UUID = row["id"]
+    workspace_id, _ = await new_workspace(conn)
     return workspace_id
 
 
@@ -62,9 +56,7 @@ async def test_a_balance_is_held_then_partially_captured_once(conn: Conn) -> Non
     fake = FakePayPal()
     payment_id = await _paid(conn, fake)
     async with conn.transaction():
-        command = await commands.record_command(
-            conn, payment_id, "capture", amount_minor=20000, final_capture=True
-        )
+        command = await commands.record_command(conn, payment_id, "capture", amount_minor=20000)
 
     outcome = await service.execute(conn, fake.client(), command["id"])
 
@@ -107,9 +99,7 @@ async def test_an_unknown_capture_is_reconciled_with_the_same_request_id(conn: C
     payment_id = await _paid(conn, fake)
     fake.time_out_first.add("capture")
     async with conn.transaction():
-        command = await commands.record_command(
-            conn, payment_id, "capture", amount_minor=30000, final_capture=True
-        )
+        command = await commands.record_command(conn, payment_id, "capture", amount_minor=30000)
 
     first = await service.execute(conn, fake.client(), command["id"])
     second = await service.reconcile(conn, fake.client(), payment_id)
@@ -259,3 +249,39 @@ async def test_payment_events_are_append_only(conn: Conn) -> None:
         )
     with pytest.raises(psycopg.errors.RaiseException, match="APPEND_ONLY"):
         await conn.execute("delete from payment_events where payment_id = %s", (payment_id,))
+
+
+async def test_a_refused_resend_keeps_the_command_open_and_its_key(conn: Conn) -> None:
+    """The first send may have captured: PayPal refusing the resend proves nothing."""
+    fake = FakePayPal()
+    payment_id = await _paid(conn, fake)
+    fake.time_out_first.add("capture")
+    async with conn.transaction():
+        command = await commands.record_command(conn, payment_id, "capture", amount_minor=30000)
+    await service.execute(conn, fake.client(), command["id"])
+    fake.refuse.add("capture")
+
+    outcome = await service.reconcile(conn, fake.client(), payment_id)
+
+    assert outcome == {command["id"]: "unknown"}
+    assert (await _command(conn, command["id"]))["error_code"] == "PAYPAL_DECLINED"
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        async with conn.transaction():
+            await commands.record_command(conn, payment_id, "void", amount_minor=0)
+
+
+async def test_a_hold_is_reauthorized_again_but_one_at_a_time(conn: Conn) -> None:
+    fake = FakePayPal()
+    payment_id = await _paid(conn, fake)
+    for _ in range(2):
+        async with conn.transaction():
+            reauth = await commands.record_command(
+                conn, payment_id, "reauthorize", amount_minor=30000
+            )
+        assert await service.execute(conn, fake.client(), reauth["id"]) == "succeeded"
+    async with conn.transaction():
+        await commands.record_command(conn, payment_id, "reauthorize", amount_minor=30000)
+
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        async with conn.transaction():
+            await commands.record_command(conn, payment_id, "reauthorize", amount_minor=30000)

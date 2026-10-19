@@ -1,1 +1,1 @@
-"""money: built in a later plan step; listed now so the layer contract covers it."""
+"""money: PayPal sandbox payments and the money commands that move them (plan step 4)."""
