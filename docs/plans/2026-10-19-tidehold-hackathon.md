@@ -67,7 +67,7 @@
   - Acceptance: attachment `model-benchmark.md` with per model: structured-output success, span verification pass rate, needs-ruling recall against the labels, trigger-match accuracy, p50 and p95 latency, limits hit.
   - Stop if: no candidate reaches ≥80% structured-output success or p95 ≤60 s (then D6 considers a paid option now).
   - Needs a human: confirm the labelled expected outputs before the run.
-- [ ] **3. Walking skeleton** (blocked by: D1; target 2026-10-22)
+- [x] **3. Walking skeleton** (blocked by: D1; target 2026-10-22)
   - Scope: backend and web scaffold, pinned toolchain, `make check` (lint, typecheck, unit, integration with an isolated PostgreSQL), GitHub Actions CI on push and PR, one thin path: operator workspace session → create trip → guest link page renders the trip. Run the quality-baseline skill before the first CI.
   - Consumers: `rg -n "make check" .github docs`.
   - Must not change: `AGENTS.md` contract.
@@ -171,7 +171,7 @@ States: not started / in progress / code done, acceptance pending / done.
 |---|---|---|---|---|
 | 1 Feeds spike and recorder | done | feeds matrix: 7 sources (9 feeds) fetched and parsed 2026-10-18; recorder unit tests 9/9, mutation (drop `http_status` from required fields) fails a test; `check.py /var/lib/tidehold-recorder --expect <9 sources>` on oci-a1 at 2026-10-18 19:00 UTC: ok, 4 consecutive index fetches per source, all 200; fallback /deposits 200 | milestone (triggering CAP warning by 2026-10-30) still open; recorder keeps running until step 12 | 5a3c3d9 |
 | 2 Model benchmark | not started | | | |
-| 3 Walking skeleton | not started | | | |
+| 3 Walking skeleton | done | CI run 39188913007 on c3ae2db green (make check, security); `make check` locally: 6 integration, 1 backend unit, 3 web unit, 9 recorder tests pass; mutation (guest lookup `guest_token <> %s`) fails 2 integration tests; violations fail their checks: reverse import (import-linter), lib → feature and feature → feature (dependency-cruiser), `it.only` (Biome), Action by tag (zizmor exit 14); lefthook pre-push refused a push with `it.only` in the tree; thin path run by hand on local Postgres + uvicorn + `next start` (guest page shows the trip, unknown token 404) | quality-baseline Prompt 2 (design anti-pattern rules, suppression and test-count locks) runs in a separate session; Prompt 3 (dev tier with money and credentials items) not inventoried yet | c3ae2db |
 | 4 Money engine port | not started | | | |
 | 5 Policy compilation | not started | | | |
 | 6 Trips and holds | not started | | | |
