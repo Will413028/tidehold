@@ -12,6 +12,10 @@ class Settings:
     # New PayPal payments (checkout or test-card attempts) a workspace may open per UTC day;
     # protects the sandbox merchant shared with the fallback demo (threat model surface 2).
     paypal_daily_open_cap: int = 30
+    # Sandbox credentials; without them the PayPal routes answer 503.
+    paypal: "PayPalCredentials | None" = None
+    # The due_actions worker runs inside the API process (one host, runtime ADR).
+    run_worker: bool = False
 
     def __post_init__(self) -> None:
         parts = urlsplit(self.public_origin)
@@ -49,4 +53,6 @@ def from_env() -> Settings:
         database_url=database_url_from_env(),
         public_origin=os.environ["PUBLIC_ORIGIN"],
         paypal_daily_open_cap=int(os.environ.get("PAYPAL_DAILY_OPEN_CAP", "30")),
+        paypal=paypal_from_env() if "PAYPAL_CLIENT_ID" in os.environ else None,
+        run_worker=os.environ.get("RUN_WORKER", "true") != "false",
     )

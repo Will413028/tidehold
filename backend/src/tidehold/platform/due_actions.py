@@ -52,13 +52,15 @@ async def schedule(
     conn: Conn,
     kind: Kind,
     *,
-    due_at: datetime,
+    due_at: datetime | None,
     trip_id: UUID | None = None,
     payment_id: UUID | None = None,
 ) -> None:
-    """Ensure one open action of this kind for the subject; an open one is left as it is."""
+    """Ensure one open action of this kind for the subject; an open one is left as it is.
+    Without `due_at`, the action is due a minute from the database's clock."""
     await conn.execute(
-        "insert into due_actions (kind, trip_id, payment_id, due_at) values (%s, %s, %s, %s)"
+        "insert into due_actions (kind, trip_id, payment_id, due_at)"
+        " values (%s, %s, %s, coalesce(%s, now() + interval '1 minute'))"
         " on conflict (kind, coalesce(trip_id, payment_id)) where state in ('pending', 'running')"
         " do nothing",
         (kind, trip_id, payment_id, due_at),

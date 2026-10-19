@@ -1,6 +1,6 @@
 from httpx import AsyncClient
 
-TRIP = {"name": "Anilao weekend", "starts_on": "2026-12-05", "days": 3}
+from tests.integration.payloads import TRIP
 
 
 async def test_a_post_from_another_origin_is_refused(operator: AsyncClient) -> None:

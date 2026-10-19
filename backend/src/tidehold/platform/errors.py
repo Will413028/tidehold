@@ -23,5 +23,9 @@ class LimitReached(DomainError):
     """A cap that protects shared quota is used up for now."""
 
 
-class OutcomeUnknown(DomainError):
+class Unavailable(DomainError):
+    """A dependency is down or not configured; trying again later may work."""
+
+
+class OutcomeUnknown(Unavailable):
     """An external call may or may not have taken effect; it is reconciled later."""

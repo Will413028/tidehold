@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from testcontainers.community.postgres import PostgresContainer
 
+from tests.integration.fake_paypal import FakePayPal
 from tidehold.bootstrap.app import create_app
 from tidehold.platform.db import Conn, connect
 from tidehold.platform.migrate import migrate
@@ -28,13 +29,20 @@ ORIGIN = "http://test"
 def _truncate(database_url: str) -> None:
     with psycopg.connect(database_url) as conn:
         conn.execute(
-            "truncate due_actions, payment_events, money_commands, payments, trips, workspaces"
+            "truncate due_actions, guests, payment_events, money_commands, payments, trips,"
+            " workspaces"
         )
 
 
 @pytest.fixture
-def app(database_url: str) -> Iterator[FastAPI]:
-    yield create_app(Settings(database_url=database_url, public_origin=ORIGIN))
+def paypal() -> FakePayPal:
+    return FakePayPal()
+
+
+@pytest.fixture
+def app(database_url: str, paypal: FakePayPal) -> Iterator[FastAPI]:
+    settings = Settings(database_url=database_url, public_origin=ORIGIN)
+    yield create_app(settings, paypal=paypal.client())
     _truncate(database_url)
 
 

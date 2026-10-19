@@ -15,6 +15,7 @@ from psycopg.rows import DictRow
 
 from tidehold.money import commands
 from tidehold.money.paypal import (
+    TEST_CARD,
     PayPalClient,
     PayPalError,
     PayPalUnexpectedResponse,
@@ -24,6 +25,7 @@ from tidehold.money.paypal import (
     capture_of,
     order_id_of,
 )
+from tidehold.platform import due_actions as due
 from tidehold.platform.db import Conn
 from tidehold.platform.errors import Conflict, DomainError
 
@@ -116,6 +118,7 @@ async def execute(
     except PayPalUnknownOutcome as error:
         async with conn.transaction():
             await commands.complete(conn, command_id, "unknown", error_code=error.code)
+            await due.schedule(conn, "reconcile_payment", due_at=None, payment_id=payment["id"])
         return "unknown"
     except PayPalError as error:
         # A refusal of the first send means no money moved. A refusal of a resend may mean
@@ -143,6 +146,14 @@ async def reconcile(
         except DomainError as error:
             outcomes[command_id] = error.code
     return outcomes
+
+
+async def reconcile_due(conn: Conn, client: PayPalClient, payment_id: UUID) -> None:
+    """The `reconcile_payment` due action: resend the payment's open commands; back off while
+    PayPal's answer is still unknown (a command refused on resend stays open for step 8)."""
+    outcomes = await reconcile(conn, client, payment_id, TEST_CARD)
+    if "unknown" in outcomes.values():
+        raise due.RetryLater("PAYPAL_OUTCOME_STILL_UNKNOWN")
 
 
 class PaymentRefused(Conflict):
