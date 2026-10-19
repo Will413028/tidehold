@@ -6,7 +6,7 @@ from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute, iter_route_contexts
 from httpx import AsyncClient
 
-from tests.integration.payloads import TRIP
+from tests.integration.payloads import post_trip, publish_policy
 from tidehold.bootstrap.app import create_app
 from tidehold.bootstrap.routes import Access
 from tidehold.platform.settings import Settings
@@ -62,13 +62,16 @@ ROUTES = _id_bearing_workspace_routes()
 
 
 async def _trip(operator: AsyncClient) -> str:
-    trip_id: str = (await operator.post("/api/trips", json=TRIP)).json()["id"]
+    trip_id: str = (await post_trip(operator)).json()["id"]
     return trip_id
 
 
 # How workspace A makes the thing each path parameter names. A new ID-bearing route with a
 # parameter missing here fails the cross-workspace test until its factory is added.
-ID_FACTORIES: dict[str, Callable[[AsyncClient], Awaitable[str]]] = {"trip_id": _trip}
+ID_FACTORIES: dict[str, Callable[[AsyncClient], Awaitable[str]]] = {
+    "trip_id": _trip,
+    "version_id": publish_policy,
+}
 # A valid body, so a route that validates its body still answers 404, not 400.
 BODIES: dict[tuple[str, str], dict[str, object]] = {
     ("POST", "/api/trips/{trip_id}/guests"): {"name": "Ana"},

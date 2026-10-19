@@ -15,6 +15,10 @@ class NotFound(DomainError):
         super().__init__("NOT_FOUND")
 
 
+class Invalid(DomainError):
+    """The request is well formed but its content is refused; the code says which check."""
+
+
 class Conflict(DomainError):
     """The current state refuses the request; the code says which state."""
 

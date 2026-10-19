@@ -1,11 +1,11 @@
 from httpx import AsyncClient
 
-from tests.integration.payloads import TRIP
+from tests.integration.payloads import TRIP, post_trip
 from tidehold.platform.migrate import migrate
 
 
 async def _guest_link(operator: AsyncClient) -> str:
-    trip = (await operator.post("/api/trips", json=TRIP)).json()
+    trip = (await post_trip(operator)).json()
     invited = (await operator.post(f"/api/trips/{trip['id']}/guests", json={"name": "Ana"})).json()
     token: str = invited["guests"][0]["token"]
     return token
@@ -45,7 +45,7 @@ async def test_creating_a_trip_needs_a_workspace_session(client: AsyncClient) ->
 
 
 async def test_a_trip_longer_than_ten_days_is_refused(operator: AsyncClient) -> None:
-    response = await operator.post("/api/trips", json={**TRIP, "days": 11})
+    response = await post_trip(operator, days=11)
 
     assert response.status_code == 400
 
@@ -53,7 +53,7 @@ async def test_a_trip_longer_than_ten_days_is_refused(operator: AsyncClient) -> 
 async def test_workspaces_see_only_their_own_trips(
     operator: AsyncClient, other_operator: AsyncClient
 ) -> None:
-    await operator.post("/api/trips", json=TRIP)
+    await post_trip(operator)
 
     mine = (await operator.get("/api/trips")).json()
     theirs = (await other_operator.get("/api/trips")).json()

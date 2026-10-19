@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, FastAPI
 
 from tidehold.holds import http as holds
 from tidehold.identity import sessions
+from tidehold.policy import http as policy
 from tidehold.trips import http as trips
 
 
@@ -29,7 +30,7 @@ async def health_check() -> dict[str, str]:
 
 
 TABLE: dict[Access, list[APIRouter]] = {
-    Access.WORKSPACE: [sessions.router, trips.router],
+    Access.WORKSPACE: [sessions.router, policy.router, trips.router],
     Access.GUEST: [holds.router],
     Access.PUBLIC: [health, sessions.public_router, holds.public_router],
 }

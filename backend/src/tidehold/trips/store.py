@@ -10,7 +10,8 @@ from psycopg.rows import DictRow
 
 from tidehold.money import commands
 from tidehold.platform.db import Conn, insert_returning
-from tidehold.platform.errors import Conflict, LimitReached, NotFound
+from tidehold.platform.errors import Conflict, Invalid, LimitReached, NotFound
+from tidehold.policy import versions
 
 # Longer trips cannot settle inside one PayPal authorization (deposit/balance ADR).
 MAX_TRIP_DAYS = 10
@@ -30,13 +31,29 @@ class NewTrip:
     warning_areas: list[str]
     deposit_minor: int
     balance_minor: int
+    policy_version_id: UUID
+    policy_product: str | None = None
 
 
 def ends_on(starts_on: date, days: int) -> date:
     return starts_on + timedelta(days=days - 1)
 
 
+def _check_binding(version: DictRow, trip: NewTrip) -> None:
+    """The trip's warning source is the one its policy's warning conditions name, and a
+    version with several products says which one the trip is."""
+    source = version["warning_source"]
+    if source is not None and source != trip.warning_source:
+        raise Invalid("WARNING_SOURCE_MISMATCH")
+    products = versions.products(version)
+    if trip.policy_product is not None and trip.policy_product not in products:
+        raise Invalid("POLICY_PRODUCT_UNKNOWN")
+    if trip.policy_product is None and len(products) > 1:
+        raise Invalid("POLICY_PRODUCT_REQUIRED")
+
+
 async def create_trip(conn: Conn, workspace_id: UUID, trip: NewTrip) -> UUID:
+    _check_binding(await versions.version(conn, workspace_id, trip.policy_version_id), trip)
     async with conn.transaction():
         await conn.execute("select 1 from workspaces where id = %s for update", (workspace_id,))
         count = await (
@@ -49,8 +66,9 @@ async def create_trip(conn: Conn, workspace_id: UUID, trip: NewTrip) -> UUID:
         row = await insert_returning(
             conn,
             "insert into trips (workspace_id, name, starts_on, days, site_lat, site_lon,"
-            " warning_source, warning_areas, deposit_minor, balance_minor)"
-            " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) returning id",
+            " warning_source, warning_areas, deposit_minor, balance_minor, policy_version_id,"
+            " policy_product) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            " returning id",
             (
                 workspace_id,
                 trip.name,
@@ -62,6 +80,8 @@ async def create_trip(conn: Conn, workspace_id: UUID, trip: NewTrip) -> UUID:
                 trip.warning_areas,
                 trip.deposit_minor,
                 trip.balance_minor,
+                trip.policy_version_id,
+                trip.policy_product,
             ),
         )
     trip_id: UUID = row["id"]

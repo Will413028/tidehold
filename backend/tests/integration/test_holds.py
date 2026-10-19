@@ -7,7 +7,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from tests.integration.fake_paypal import FakePayPal
-from tests.integration.payloads import TRIP, trip_starting
+from tests.integration.payloads import TRIP, post_trip, trip_starting
 from tidehold.bootstrap import worker
 from tidehold.bootstrap.app import create_app
 from tidehold.platform.db import Conn
@@ -23,7 +23,7 @@ async def _tick(conn: Conn, paypal: FakePayPal, now: datetime) -> None:
 
 
 async def _invite(operator: AsyncClient, trip: dict[str, Any], name: str = "Ana") -> str:
-    created = (await operator.post("/api/trips", json=trip)).json()
+    created = (await post_trip(operator, trip)).json()
     invited = await operator.post(f"/api/trips/{created['id']}/guests", json={"name": name})
     token: str = invited.json()["guests"][-1]["token"]
     return token
@@ -61,7 +61,7 @@ async def test_a_trip_booked_inside_the_window_opens_at_the_next_tick(
 async def test_a_guest_invited_after_the_balance_opened_gets_a_balance_payment(
     operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
 ) -> None:
-    trip = (await operator.post("/api/trips", json=TRIP)).json()
+    trip = (await post_trip(operator)).json()
     await _tick(conn, paypal, OPENS)
 
     invited = await operator.post(f"/api/trips/{trip['id']}/guests", json={"name": "Ben"})
@@ -135,7 +135,7 @@ async def test_judge_flow_and_workspace_isolation(
 ) -> None:
     """Ported from dive-trip-agent@8065eba tests/test_deposits_http.py: the operator sets up a
     trip, a guest pays deposit and balance, and another workspace sees none of it."""
-    trip = (await operator.post("/api/trips", json=TRIP)).json()
+    trip = (await post_trip(operator)).json()
     invited = await operator.post(f"/api/trips/{trip['id']}/guests", json={"name": "Judge"})
     token = invited.json()["guests"][0]["token"]
 
@@ -162,9 +162,9 @@ async def test_a_workspace_cannot_create_trips_beyond_its_cap(
     operator: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(store, "MAX_TRIPS_PER_WORKSPACE", 1)
-    await operator.post("/api/trips", json=TRIP)
+    await post_trip(operator)
 
-    second = await operator.post("/api/trips", json=TRIP)
+    second = await post_trip(operator)
 
     assert (second.status_code, second.json()) == (429, {"detail": "TRIP_CAP_REACHED"})
 
@@ -173,7 +173,7 @@ async def test_a_trip_takes_a_bounded_number_of_guests(
     operator: AsyncClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(store, "MAX_GUESTS_PER_TRIP", 1)
-    trip = (await operator.post("/api/trips", json=TRIP)).json()
+    trip = (await post_trip(operator)).json()
     url = f"/api/trips/{trip['id']}/guests"
     await operator.post(url, json={"name": "Ana"})
 
@@ -183,7 +183,7 @@ async def test_a_trip_takes_a_bounded_number_of_guests(
 
 
 async def test_a_guest_name_is_taken_once_per_trip(operator: AsyncClient) -> None:
-    trip = (await operator.post("/api/trips", json=TRIP)).json()
+    trip = (await post_trip(operator)).json()
     url = f"/api/trips/{trip['id']}/guests"
     await operator.post(url, json={"name": "Ana"})
 
@@ -196,7 +196,7 @@ async def test_a_guest_name_is_taken_once_per_trip(operator: AsyncClient) -> Non
 async def test_money_inputs_are_strict_and_refusals_do_not_echo_them(
     operator: AsyncClient, amount: object
 ) -> None:
-    response = await operator.post("/api/trips", json={**TRIP, "deposit_minor": amount})
+    response = await post_trip(operator, deposit_minor=amount)
 
     assert (response.status_code, response.json()) == (400, {"detail": "INVALID_REQUEST"})
 
@@ -220,7 +220,7 @@ async def test_without_paypal_credentials_payments_are_unavailable(
 async def test_the_trip_timeline_lists_each_guests_money_events(
     operator: AsyncClient, client: AsyncClient
 ) -> None:
-    trip = (await operator.post("/api/trips", json=TRIP)).json()
+    trip = (await post_trip(operator)).json()
     invited = await operator.post(f"/api/trips/{trip['id']}/guests", json={"name": "Ana"})
     await client.post(f"/api/guest/{invited.json()['guests'][0]['token']}/deposit/test-card")
 

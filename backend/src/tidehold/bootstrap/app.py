@@ -12,6 +12,7 @@ from tidehold.money.paypal import PayPalClient
 from tidehold.platform.errors import (
     Conflict,
     DomainError,
+    Invalid,
     LimitReached,
     NotConfigured,
     NotFound,
@@ -20,6 +21,7 @@ from tidehold.platform.errors import (
 from tidehold.platform.settings import Settings, from_env
 
 STATUS_OF: dict[type[DomainError], int] = {
+    Invalid: status.HTTP_400_BAD_REQUEST,
     NotFound: status.HTTP_404_NOT_FOUND,
     Conflict: status.HTTP_409_CONFLICT,
     LimitReached: status.HTTP_429_TOO_MANY_REQUESTS,

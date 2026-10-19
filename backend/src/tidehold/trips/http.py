@@ -33,6 +33,8 @@ class NewTrip(BaseModel):
     warning_areas: list[AreaCode] = Field(min_length=1, max_length=20)
     deposit_minor: Minor
     balance_minor: Minor
+    policy_version_id: UUID
+    policy_product: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class NewGuest(BaseModel):
@@ -62,6 +64,8 @@ class Trip(BaseModel):
     deposit_minor: int
     balance_minor: int
     balance_requested_at: datetime | None
+    policy_version_id: UUID
+    policy_product: str | None
     guests: list[Guest]
 
 
