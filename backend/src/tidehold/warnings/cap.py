@@ -3,7 +3,11 @@
 PAGASA and MeteoAlarm publish CAP 1.2 XML; NWS publishes GeoJSON carrying the CAP fields.
 Each becomes one `OfficialWarning` per CAP `info` (MeteoAlarm repeats `info` per language: the
 English one is kept). Area codes are what a trip's warning area is matched on: PAGASA's
-SAME/PSGC geocodes, NWS UGC marine zones, MeteoAlarm EMMA_IDs (feeds-matrix.md).
+SAME/PSGC geocodes, NWS UGC marine zones, MeteoAlarm EMMA_IDs (feeds-matrix.md). A rule matches
+on `event_codes` where the source publishes them (NWS), on the awareness parameters
+(MeteoAlarm) or on the event text (PAGASA has neither). `status` and `supersedes` carry the
+CAP lifecycle: only Actual messages are evidence, and an Update or Cancel replaces the
+messages it references (CAP 1.2 §3.2.1).
 Feed content is untrusted: XML goes through defusedxml, and nothing here is executed.
 """
 
@@ -42,12 +46,17 @@ class OfficialWarning:
     event: str
     severity: str
     msg_type: str
+    status: str
     headline: str
     area_desc: str
     area_codes: tuple[str, ...]
     url: str
     # MeteoAlarm's awareness type and level; empty for the other sources.
     parameters: dict[str, str] = field(default_factory=dict)
+    # CAP eventCode valueName -> value (NWS: NationalWeatherService, e.g. GLW).
+    event_codes: dict[str, str] = field(default_factory=dict)
+    # Identifiers of the messages this Update or Cancel replaces.
+    supersedes: tuple[str, ...] = ()
 
 
 class UnreadableWarning(ValueError):
@@ -66,6 +75,15 @@ def _time(value: str | None) -> datetime:
 def _text(element: Element, tag: str) -> str:
     found = element.find(f"{CAP}{tag}")
     return (found.text or "").strip() if found is not None else ""
+
+
+def _references(value: str) -> tuple[str, ...]:
+    """CAP `references`: space-separated `sender,identifier,sent` triples."""
+    return tuple(ref.split(",")[1] for ref in value.split() if ref.count(",") == 2)
+
+
+def _pairs(info: Element, tag: str) -> dict[str, str]:
+    return {_text(p, "valueName"): _text(p, "value") for p in info.findall(f"{CAP}{tag}")}
 
 
 def _english_infos(alert: Element) -> list[Element]:
@@ -93,9 +111,7 @@ def parse_cap(body: str, source: Source, url: str) -> list[OfficialWarning]:
             for geocode in area.findall(f"{CAP}geocode"):
                 if _text(geocode, "valueName") in AREA_CODES[source]:
                     codes.append(_text(geocode, "value"))
-        parameters = {
-            _text(p, "valueName"): _text(p, "value") for p in info.findall(f"{CAP}parameter")
-        }
+        parameters = _pairs(info, "parameter")
         warnings.append(
             OfficialWarning(
                 source=source,
@@ -108,11 +124,14 @@ def parse_cap(body: str, source: Source, url: str) -> list[OfficialWarning]:
                 event=_text(info, "event"),
                 severity=_text(info, "severity"),
                 msg_type=_text(alert, "msgType"),
+                status=_text(alert, "status"),
                 headline=_text(info, "headline"),
                 area_desc="; ".join(d for d in descriptions if d),
                 area_codes=tuple(dict.fromkeys(codes)),
                 url=url,
                 parameters={k: v for k, v in parameters.items() if k.startswith("awareness_")},
+                event_codes=_pairs(info, "eventCode"),
+                supersedes=_references(_text(alert, "references")),
             )
         )
     return warnings
@@ -129,10 +148,13 @@ def _nws_feature(feature: dict[str, Any]) -> OfficialWarning:
         event=str(p.get("event", "")),
         severity=str(p.get("severity", "")),
         msg_type=str(p.get("messageType", "")),
+        status=str(p.get("status", "")),
         headline=str(p.get("headline") or ""),
         area_desc=str(p.get("areaDesc", "")),
         area_codes=tuple(p.get("geocode", {}).get("UGC", [])),
         url=str(feature.get("id") or p.get("@id") or ""),
+        event_codes={str(k): str(v[0]) for k, v in p.get("eventCode", {}).items() if v},
+        supersedes=tuple(str(r["identifier"]) for r in p.get("references", [])),
     )
 
 

@@ -1,8 +1,9 @@
 """The evidence store: recorded official warnings, their replays, and what a decision may see.
 
-The settlement agent asks for evidence as of a decision time; only warnings fetched (or, when
-replayed, shifted to) at or before that time are returned (invariant: the agent sees only
-evidence fetched before the decision time).
+Settlement asks for evidence as of a decision time; only warnings fetched (or, when replayed,
+shifted to) at or before that time are returned (invariant: a decision sees only evidence
+fetched before the decision time). Of those, only Actual messages that no visible Update or
+Cancel has replaced count; a Cancel itself is never evidence.
 """
 
 import gzip
@@ -23,14 +24,18 @@ from tidehold.warnings.cap import OfficialWarning, Source, UnreadableWarning, fr
 
 
 async def record(conn: Conn, warning: OfficialWarning, fetched_at: datetime) -> bool:
-    """Store a warning once, keeping its earliest fetch time; True when it was new."""
+    """Store a warning once, keeping its earliest fetch time; True when it was new. The
+    lifecycle fields are rewritten on conflict so rows recorded before they existed fill in."""
     row = await (
         await conn.execute(
             "insert into official_warnings (source, identifier, sent, onset, expires, event,"
-            " severity, msg_type, headline, area_desc, area_codes, parameters, url, fetched_at)"
-            " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            " severity, msg_type, headline, area_desc, area_codes, parameters, url, fetched_at,"
+            " status, supersedes, event_codes)"
+            " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
             " on conflict (source, identifier) do update"
-            "   set fetched_at = least(official_warnings.fetched_at, excluded.fetched_at)"
+            "   set fetched_at = least(official_warnings.fetched_at, excluded.fetched_at),"
+            "       status = excluded.status, supersedes = excluded.supersedes,"
+            "       event_codes = excluded.event_codes"
             " returning (xmax = 0) as inserted",
             (
                 warning.source,
@@ -47,6 +52,9 @@ async def record(conn: Conn, warning: OfficialWarning, fetched_at: datetime) -> 
                 Jsonb(warning.parameters),
                 warning.url,
                 fetched_at,
+                warning.status,
+                list(warning.supersedes),
+                Jsonb(warning.event_codes),
             ),
         )
     ).fetchone()
@@ -99,6 +107,8 @@ async def replay(conn: Conn, workspace_id: UUID, warning_id: UUID, fetched_at: d
     return replay_id
 
 
+# A replacing message only replaces within its own timeline: live by live, and replayed by
+# replayed in the same workspace, so a live Update fetched long ago cannot hide a replay.
 EVIDENCE = """
 with evidence as (
     select w.*, null::interval as shift, w.fetched_at as visible_at, false as replayed
@@ -107,16 +117,23 @@ with evidence as (
     select w.*, r.shift, w.fetched_at + r.shift as visible_at, true as replayed
     from official_warnings w join warning_replays r on r.warning_id = w.id
     where r.workspace_id = %(workspace)s
+),
+visible as (
+    select * from evidence where source = %(source)s and visible_at <= %(at)s
 )
-select id, source, identifier, event, severity, msg_type, headline, area_desc, area_codes,
-       parameters, url, replayed,
+select id, source, identifier, event, severity, msg_type, status, event_codes, headline,
+       area_desc, area_codes, parameters, url, replayed,
        fetched_at as recorded_at,
        visible_at,
        onset + coalesce(shift, interval '0') as onset,
        expires + coalesce(shift, interval '0') as expires
-from evidence
-where source = %(source)s and area_codes && %(areas)s
-  and visible_at <= %(at)s
+from visible v
+where area_codes && %(areas)s
+  and status = 'Actual' and msg_type <> 'Cancel'
+  and not exists (
+      select 1 from visible later
+      where later.replayed = v.replayed and v.identifier = any(later.supersedes)
+  )
   and onset + coalesce(shift, interval '0') < %(until)s
   and expires + coalesce(shift, interval '0') > %(since)s
 order by visible_at, id

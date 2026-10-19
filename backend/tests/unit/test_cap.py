@@ -27,6 +27,9 @@ def test_a_recorded_pagasa_cap_document_is_read() -> None:
     assert warning.area_codes
     assert all(code.isdigit() for code in warning.area_codes)
     assert warning.url.endswith(".cap")
+    assert (warning.status, warning.msg_type) == ("Actual", "Update")
+    assert warning.supersedes == ("e40fb2aa-836d-4441-abf3-c0b4924d00dd",)
+    assert warning.event_codes == {}
 
 
 def test_a_failed_fetch_carries_no_warning() -> None:
@@ -39,6 +42,12 @@ def test_a_recorded_nws_marine_collection_is_read() -> None:
     assert len(warnings) == 259
     assert {"Gale Warning", "Small Craft Advisory"} <= {w.event for w in warnings}
     assert all(w.area_codes and w.onset.tzinfo and w.expires > w.onset for w in warnings)
+    assert {w.event_codes["NationalWeatherService"] for w in warnings} >= {"GLW", "SCY"}
+    assert {w.status for w in warnings} == {"Actual"}
+    updates = [w for w in warnings if w.msg_type == "Update"]
+    assert updates
+    assert all(w.supersedes for w in updates)
+    assert all(ref.startswith("urn:oid:") for w in updates for ref in w.supersedes)
 
 
 METEOALARM = """<?xml version="1.0" encoding="UTF-8"?>
@@ -72,6 +81,23 @@ def test_meteoalarm_keeps_the_english_info_and_its_awareness_level() -> None:
         "awareness_level": "2; yellow; Moderate",
         "awareness_type": "1; Wind",
     }
+
+
+def test_meteoalarm_cancel_names_the_messages_it_replaces() -> None:
+    cancel = (
+        METEOALARM.replace("<msgType>Alert</msgType>", "<msgType>Cancel</msgType>")
+        .replace("TEST.1</identifier>", "TEST.2</identifier>")
+        .replace(
+            "<scope>",
+            "<references>test,2.49.0.0.191.0.HR.TEST.1,2026-10-17T00:01:01+02:00 "
+            "test,2.49.0.0.191.0.HR.TEST.0,2026-10-16T00:01:01+02:00</references><scope>",
+        )
+    )
+
+    [warning] = parse_cap(cancel, "meteoalarm", "https://feeds.meteoalarm.org/x")
+
+    assert warning.msg_type == "Cancel"
+    assert warning.supersedes == ("2.49.0.0.191.0.HR.TEST.1", "2.49.0.0.191.0.HR.TEST.0")
 
 
 BOMB = """<?xml version="1.0"?>
