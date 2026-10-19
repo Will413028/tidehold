@@ -3,8 +3,8 @@ event set (D16, plan steps 2 and 5).
 
 The model's output is untrusted: it must match the schema, every quote must be found in the
 stored wording (`spans.locate`), and a warning source or event value must come from the
-catalogue the caller passes (`policy` sits below `warnings`). A rule whose quote cannot be found
-after one retry is not kept: it becomes a "span_not_found" ruling for the operator.
+catalogue the caller passes (`warnings.catalogue` in the product). A rule whose quote cannot be
+found after one retry is not kept: it becomes a "span_not_found" ruling for the operator.
 """
 
 import json

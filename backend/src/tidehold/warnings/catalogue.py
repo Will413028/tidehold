@@ -2,9 +2,9 @@
 
 A rule's warning condition is a closed set of these values, proposed by the model and confirmed
 by the operator; settlement matches a warning by membership, never by reading its text. The
-policy compiler receives this catalogue from its caller (`policy` sits below `warnings`). A value
-outside the catalogue is refused, and a warning whose value is not in the confirmed set does not
-match (the operator is asked instead).
+policy module validates rules against it (`policy` sits above `warnings`). A value outside the
+catalogue is refused, and a warning whose value is not in the confirmed set does not match (the
+operator is asked instead).
 
 - NWS: the `event` of an alert, from the controlled list at https://api.weather.gov/alerts/types
   (read 2026-10-19), marine and coastal entries.

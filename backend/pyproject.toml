@@ -87,7 +87,8 @@ layers = [
     "bootstrap",
     "settlement",
     "holds",
-    "trips | warnings",
-    "policy | money | identity",
+    "trips",
+    "policy",
+    "warnings | money | identity",
     "platform",
 ]

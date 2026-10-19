@@ -26,11 +26,12 @@ Backend (`backend/src/tidehold/`), top to bottom; a module imports only modules 
 1. `bootstrap`: FastAPI app and wiring
 2. `settlement`
 3. `holds`
-4. `trips` | `warnings`
-5. `policy` | `money` | `identity`
-6. `platform`: settings, database, migrations
+4. `trips`
+5. `policy`
+6. `warnings` | `money` | `identity`
+7. `platform`: settings, database, migrations
 
-`warnings` does not import `trips`; the caller passes the warning area in. A new top-level module must be added to the `[tool.importlinter]` layers in `backend/pyproject.toml` (the contract is exhaustive). When a check fails, move the code; do not add an `ignore_imports` exception.
+`warnings` does not import `trips`; the caller passes the warning area in. `policy` sits above `warnings` because a rule's warning condition names values from its event catalogue. A new top-level module must be added to the `[tool.importlinter]` layers in `backend/pyproject.toml` (the contract is exhaustive). When a check fails, move the code; do not add an `ignore_imports` exception.
 
 Web (`web/src/`): `app` → `features` → `lib`. A feature does not import another feature (shared code goes to `lib`); `app` imports a feature only through its `index.ts`; server-only modules import `server-only`. Enforced by `web/.dependency-cruiser.cjs`.
 
