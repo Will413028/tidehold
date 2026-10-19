@@ -9,7 +9,7 @@ A public demo, reachable without accounts, where a dive operator compiles its ca
 Assets, most valuable first:
 
 1. Control over money commands (capture, void, refund, reauthorize) on the shared PayPal sandbox merchant.
-2. The integrity of compiled rules and of the evidence that triggers them.
+2. The integrity of compiled rules and of the evidence their warning conditions match.
 3. Model and PayPal quota, shared with a fallback demo that is the submission's safety net.
 4. Whatever a visitor types in: operator wording, trip names, guest names and emails.
 5. The provider and PayPal credentials (host files on the VM, never in the repo).
@@ -52,6 +52,7 @@ Trust boundaries: browser ↔ backend (anonymous cookie session or guest link); 
 | What can go wrong | Response | Where, and the proof |
 |---|---|---|
 | A crafted or replayed feed triggers payouts | A warning never moves money alone: every settlement starts from an operator cancellation, and a warning condition matches only CAP warnings from the source the policy names, in the operator-confirmed event set; only `Actual` messages count, and a visible Update or Cancel replaces the messages it references (a Cancel is never evidence itself); Open-Meteo only corroborates; replayed recordings are labelled with their original fetch time | Feed XML is parsed with defusedxml (entities and DTDs refused: `test_untrusted_xml_that_is_not_a_plain_cap_alert_is_refused`); parser tests on recorded PAGASA and NWS samples; `test_exercise_and_test_messages_are_never_evidence`, `test_a_visible_cancel_withdraws_the_warning_and_is_not_evidence_itself` (mutation: drop the status and Cancel filter), `test_an_update_replaces_the_message_it_references`, `test_a_live_update_does_not_hide_a_replay_of_the_message_it_replaced` (mutation: drop the same-timeline condition); a replay is visible only to the workspace that made it (`test_a_replayed_warning_is_seen_only_by_its_workspace_from_its_shifted_time`); step 8 settlement tests |
+| Feed text (a CAP headline or description) steers a drafted operator ask or guest explanation | Drafted text never decides: the ask's action is a fixed choice (cancel or not) recorded by the operator, the structured warning fields and the clause are shown beside the draft from the stored rows, and a template replaces the draft when the model fails or the daily cap is reached | Step 8: a test that an ask shows the stored event, area and times whatever the draft says, and the template fallback test |
 | A decision sees evidence from after the decision time | Evidence is filtered by `fetched_at` (or replay-shifted time) before each decision | `test_evidence_fetched_after_the_decision_time_is_invisible` (mutation: drop the time filter) |
 | A capture lands outside the authorization's validity | Holds start at T-(29 − N); reauthorize before a capture after the honor period; trips over 10 days refused | Steps 6 and 8: validity test for the longest allowed trip |
 

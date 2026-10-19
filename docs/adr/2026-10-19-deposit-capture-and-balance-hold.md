@@ -60,6 +60,8 @@ A dive trip booking has a deposit taken at booking and a balance due before the 
 
 ## Review Notes
 
+- D11's "daily evaluations write outcomes to the ledger" is replaced by evaluation on each recorded operator cancellation (`docs/adr/2026-10-19-settlement-triggers-and-model-role.md`); money still moves once at finalize or on a whole-trip cancellation.
+
 ## Related
 
 - Source: decided by the developer on 2026-10-19 after a concept critique, a plan review and two independent drafts; this ADR is the original record.

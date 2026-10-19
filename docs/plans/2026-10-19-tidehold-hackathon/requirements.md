@@ -20,8 +20,8 @@ Every item maps to a plan step (column "Step"); `scripts/check_plan.py` in this 
 | R10 | Flow | Inside the operator's mandate the system executes; outside it, or on an unruled clause, it stops and asks; the operator approves or rejects | S1 | 8 |
 | R11 | Data | Credit is an internal ledger record per guest, not a PayPal object | S1, S2 | 8 |
 | R19 | Flow | On a weather cancellation the captured deposit is refunded through PayPal or recorded as credit, per the compiled policy | plan D3 | 8 |
-| R12 | Screen | Guest transparency page: hold status, the official bulletin, the clause, the outcome | S1, S2 | 9 |
-| R13 | Screen | Operator console: policy compile and rulings, trips, guests, evidence, proposals, audit timeline | S1, S5 Design | 9 |
+| R12 | Screen | Guest transparency page: hold status, the operator's cancellation, the official bulletin in force, the clause, the outcome | S1, S2 | 9 |
+| R13 | Screen | Operator console: policy compile and rulings (with event sets), trips, guests, cancelling a trip day or the trip, evidence, asks, proposals, audit timeline | S1, S5 Design | 9 |
 | R14 | NFR | Every PayPal write is stored before it is sent with PayPal-Request-Id; unknown outcomes reconcile; holds stay within 29 days | S1 | 4, 6 |
 | R15 | NFR | Sandbox only, synthetic guests; real operators' clauses only as attributed quotes; neutral fictional demo operator | S1 | 4, 10 |
 | R16 | Ops | Public demo URL judges can use without accounts; daily void-all and rebuild | S5 | 10 |
@@ -32,7 +32,7 @@ Every item maps to a plan step (column "Step"); `scripts/check_plan.py` in this 
 
 | Area | Threshold |
 |---|---|
-| Latency | Policy compile p95 ≤ 60 s for ≤ 4,000 characters (measured in step 5); settlement evaluation p95 ≤ 60 s per cancellation, code only (measured in step 8) |
+| Latency | Policy compile p95 ≤ 60 s for ≤ 4,000 characters (measured in step 5); settlement makes no model call (step 8 test) |
 | Cost | Free model tiers until judging (paid tier decided later, see D6); PayPal sandbox free; hosting on the existing VM |
 | Security | Server-only provider keys; no secrets in the repo; guest pages reachable only by unguessable link; anonymous operator workspace per browser (reused pattern) |
 | Privacy | Synthetic guests only; no real personal data entered or stored |
@@ -63,6 +63,6 @@ Every item maps to a plan step (column "Step"); `scripts/check_plan.py` in this 
 
 | Risk | Evidence today |
 |---|---|
-| Do operators want it? | 5 of 15 SEA operators state PayPal deposits on their own pages; weather terms are inconsistent; several key off official warnings (S3). No operator interview. |
+| Do operators want it? | 5 of 15 SEA operators state PayPal deposits on their own pages; weather terms are inconsistent; two condition on official information without naming a service, the rest on the operator's own cancellation (S3, D16). No operator interview. |
 | Will they reuse it? | Peak typhoon season Jul–Oct in PH (~20 cyclones/yr enter PAR); in-season cancellation rate not found (S3). |
 | Will they pay? | Unknown; PayPal fees (3–4.5%) are already passed to guests (S3). |

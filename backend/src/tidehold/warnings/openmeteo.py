@@ -1,6 +1,6 @@
 """Open-Meteo marine forecast at the dive site: corroboration only (plan step 7).
 
-A warning triggers; a forecast never does. Open-Meteo says its marine data "is not suitable
+A forecast never settles or conditions anything (D16). Open-Meteo says its marine data "is not suitable
 for coastal navigation"; its data is attributed to DWD and Open-Meteo wherever it is shown
 (marine weather API docs, read 2026-10-19). Free non-commercial use, no key.
 """
