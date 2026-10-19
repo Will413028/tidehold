@@ -13,6 +13,8 @@ COOKIE = "tidehold_session"
 # The server-side expiry (migration 0002) matches the cookie's lifetime.
 SESSION_SECONDS = 60 * 60 * 24 * 30
 
+# Creating a workspace needs no session; everything else on it does.
+public_router = APIRouter(prefix="/api/workspaces")
 router = APIRouter(prefix="/api/workspaces")
 
 
@@ -37,7 +39,7 @@ async def current_workspace(request: Request, conn: Annotated[Conn, Depends(conn
     return workspace_id
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@public_router.post("", status_code=status.HTTP_201_CREATED)
 async def create_workspace(
     request: Request, response: Response, conn: Annotated[Conn, Depends(connection)]
 ) -> dict[str, str]:

@@ -5,7 +5,7 @@ from importlib.resources import files
 
 import psycopg
 
-from tidehold.platform.settings import from_env
+from tidehold.platform.settings import database_url_from_env
 
 
 def migrate(database_url: str) -> list[str]:
@@ -36,5 +36,5 @@ def migrate(database_url: str) -> list[str]:
 
 
 if __name__ == "__main__":
-    for name in migrate(from_env().database_url):
+    for name in migrate(database_url_from_env()):
         print(f"applied {name}", file=sys.stderr)

@@ -3,13 +3,15 @@ from datetime import date, timedelta
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 
 from tidehold.identity.sessions import current_workspace
 from tidehold.platform.db import Conn, connection, insert_returning
+from tidehold.platform.errors import NotFound
 
 router = APIRouter(prefix="/api")
+guest_router = APIRouter(prefix="/api")
 
 # Longer trips cannot settle inside one PayPal authorization (deposit/balance ADR).
 MAX_TRIP_DAYS = 10
@@ -81,7 +83,25 @@ async def list_trips(
     return [Trip(**row, ends_on=_ends_on(row["starts_on"], row["days"])) for row in rows]
 
 
-@router.get("/guest/{guest_token}")
+@router.get("/trips/{trip_id}")
+async def get_trip(
+    trip_id: UUID,
+    workspace_id: Annotated[UUID, Depends(current_workspace)],
+    conn: Annotated[Conn, Depends(connection)],
+) -> Trip:
+    row = await (
+        await conn.execute(
+            "select id, name, starts_on, days, guest_token from trips"
+            " where id = %s and workspace_id = %s",
+            (trip_id, workspace_id),
+        )
+    ).fetchone()
+    if row is None:
+        raise NotFound
+    return Trip(**row, ends_on=_ends_on(row["starts_on"], row["days"]))
+
+
+@guest_router.get("/guest/{guest_token}")
 async def guest_trip(guest_token: str, conn: Annotated[Conn, Depends(connection)]) -> GuestTrip:
     row = await (
         await conn.execute(
@@ -89,5 +109,5 @@ async def guest_trip(guest_token: str, conn: Annotated[Conn, Depends(connection)
         )
     ).fetchone()
     if row is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such trip")
+        raise NotFound
     return GuestTrip(**row, ends_on=_ends_on(row["starts_on"], row["days"]))

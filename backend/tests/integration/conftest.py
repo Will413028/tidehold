@@ -21,15 +21,21 @@ def database_url() -> Iterator[str]:
         yield url
 
 
+ORIGIN = "http://test"
+
+
 @pytest.fixture
 def app(database_url: str) -> Iterator[FastAPI]:
-    yield create_app(Settings(database_url=database_url, cookie_secure=False))
+    yield create_app(Settings(database_url=database_url, public_origin=ORIGIN))
     with psycopg.connect(database_url) as conn:
         conn.execute("truncate trips, workspaces")
 
 
 def _client(app: FastAPI) -> AsyncClient:
-    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+    """A same-origin browser: it sends the Origin header the HTTP boundary expects."""
+    return AsyncClient(
+        transport=ASGITransport(app=app), base_url=ORIGIN, headers={"Origin": ORIGIN}
+    )
 
 
 @pytest.fixture

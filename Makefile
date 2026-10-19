@@ -63,7 +63,7 @@ dev-db:
 
 dev-backend:
 	cd backend && DATABASE_URL=postgresql://postgres:dev@127.0.0.1:5433/tidehold uv run python -m tidehold.platform.migrate
-	cd backend && DATABASE_URL=postgresql://postgres:dev@127.0.0.1:5433/tidehold COOKIE_SECURE=false \
+	cd backend && DATABASE_URL=postgresql://postgres:dev@127.0.0.1:5433/tidehold PUBLIC_ORIGIN=http://localhost:3000 \
 		uv run uvicorn tidehold.bootstrap.app:create_app --factory --port 8000
 
 dev-web:

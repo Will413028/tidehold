@@ -1,18 +1,35 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
 
-from tidehold.identity import sessions
+from tidehold.bootstrap import routes
+from tidehold.bootstrap.http_boundary import HttpBoundary
+from tidehold.platform.errors import Conflict, DomainError, LimitReached, NotFound, OutcomeUnknown
 from tidehold.platform.settings import Settings, from_env
-from tidehold.trips import http as trips
+
+STATUS_OF: dict[type[DomainError], int] = {
+    NotFound: status.HTTP_404_NOT_FOUND,
+    Conflict: status.HTTP_409_CONFLICT,
+    LimitReached: status.HTTP_429_TOO_MANY_REQUESTS,
+    OutcomeUnknown: status.HTTP_503_SERVICE_UNAVAILABLE,
+}
+
+
+async def domain_error(_: Request, error: Exception) -> JSONResponse:
+    if not isinstance(error, DomainError):
+        raise error
+    code = next(
+        (s for kind, s in STATUS_OF.items() if isinstance(error, kind)),
+        status.HTTP_400_BAD_REQUEST,
+    )
+    return JSONResponse({"detail": error.code}, status_code=code)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    app = FastAPI(title="tidehold")
-    app.state.settings = settings or from_env()
-    app.include_router(sessions.router)
-    app.include_router(trips.router)
-
-    @app.get("/api/health")
-    async def health() -> dict[str, str]:
-        return {"status": "ok"}
-
+    settings = settings or from_env()
+    # No interactive docs: every route must be classified in the route table.
+    app = FastAPI(title="tidehold", docs_url=None, redoc_url=None, openapi_url=None)
+    app.state.settings = settings
+    app.add_exception_handler(DomainError, domain_error)
+    routes.mount(app)
+    app.add_middleware(HttpBoundary, origin=settings.public_origin)
     return app
