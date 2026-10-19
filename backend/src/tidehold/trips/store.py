@@ -185,3 +185,18 @@ async def _open_balances(conn: Conn, trip_id: UUID) -> int:
             "update guests set balance_payment_id = %s where id = %s", (payment, guest["id"])
         )
     return len(pending)
+
+
+async def timeline(conn: Conn, workspace_id: UUID, trip_id: UUID) -> list[DictRow]:
+    """Every money event of the trip's guests, oldest first (the audit timeline)."""
+    await trip(conn, workspace_id, trip_id)
+    return await (
+        await conn.execute(
+            "select e.created_at as at, g.name as guest, p.purpose, e.kind, e.detail"
+            " from guests g join payments p"
+            "   on p.id in (g.deposit_payment_id, g.balance_payment_id)"
+            " join payment_events e on e.payment_id = p.id"
+            " where g.trip_id = %s order by e.id",
+            (trip_id,),
+        )
+    ).fetchall()

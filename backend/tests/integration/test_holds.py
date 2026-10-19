@@ -215,3 +215,18 @@ async def test_without_paypal_credentials_payments_are_unavailable(
 
     assert (paid.status_code, paid.json()) == (503, {"detail": "PAYPAL_NOT_CONFIGURED"})
     assert config.json() == {"client_id": None}
+
+
+async def test_the_trip_timeline_lists_each_guests_money_events(
+    operator: AsyncClient, client: AsyncClient
+) -> None:
+    trip = (await operator.post("/api/trips", json=TRIP)).json()
+    invited = await operator.post(f"/api/trips/{trip['id']}/guests", json={"name": "Ana"})
+    await client.post(f"/api/guest/{invited.json()['guests'][0]['token']}/deposit/test-card")
+
+    events = (await operator.get(f"/api/trips/{trip['id']}/timeline")).json()
+
+    assert [(e["guest"], e["purpose"], e["kind"]) for e in events] == [
+        ("Ana", "deposit", "payment_created"),
+        ("Ana", "deposit", "open_succeeded"),
+    ]

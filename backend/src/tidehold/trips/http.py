@@ -93,3 +93,16 @@ async def get_trip(trip_id: UUID, workspace_id: Workspace, conn: Db) -> Trip:
 async def invite_guest(trip_id: UUID, body: NewGuest, workspace_id: Workspace, conn: Db) -> Trip:
     await store.invite(conn, workspace_id, trip_id, body.name)
     return await _view(conn, (await store.trip(conn, workspace_id, trip_id)))
+
+
+class Event(BaseModel):
+    at: datetime
+    guest: str
+    purpose: str
+    kind: str
+    detail: dict[str, object]
+
+
+@router.get("/trips/{trip_id}/timeline")
+async def trip_timeline(trip_id: UUID, workspace_id: Workspace, conn: Db) -> list[Event]:
+    return [Event(**row) for row in await store.timeline(conn, workspace_id, trip_id)]
