@@ -70,4 +70,4 @@ Controls: the UI says "Sandbox demo: do not enter real personal data" (step 9); 
 ## Is it good enough
 
 - Each row above names a test or check that fails when the control is removed. A row without one is an accepted risk, listed next.
-- Accepted for the hackathon: no idle session timeout or device list (revisit when a real operator signs in, or before leaving sandbox); no penetration test or ASVS audit (revisit before real money); availability is best effort, with a recorded video as the fallback.
+- Accepted for the hackathon: no idle session timeout or device list (revisit when a real operator signs in, or before leaving sandbox); leaving a workspace forgets the session but does not void its holds, which stay until the nightly void (step 10; revisit before real money); no penetration test or ASVS audit (revisit before real money); availability is best effort, with a recorded video as the fallback.

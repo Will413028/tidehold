@@ -26,7 +26,7 @@ tidehold must act at specific times per trip: request the balance hold at T-(29 
 
 - **Baseline. PostgreSQL-backed job/schedule table claimed with `FOR UPDATE SKIP LOCKED`**: the standard for small apps with timed work — [Procrastinate](https://procrastinate.readthedocs.io/), [River](https://riverqueue.com/docs), [Oban](https://hexdocs.pm/oban); billing systems such as [Kill Bill](https://docs.killbill.io/latest/what_is_kill_bill.html) keep timers in a database queue with a movable clock for tests.
 - **A. Keep Temporal**: durable timers, signals, history UI; timers follow wall-clock time (time skipping exists only in its test environment, [docs](https://docs.temporal.io/develop/python/testing-suite)); a 512 MB service on the shared VM.
-- **B. Baseline implemented as a minimal `due_actions` table** (chosen): `(trip_id, kind, due_at, state, lease_until, attempts)` behind the existing `Workflows` Protocol seam, with an injectable clock.
+- **B. Baseline implemented as a minimal `due_actions` table** (chosen): `(trip_id, kind, due_at, state, lease_until, attempts)` with an injectable clock (the source's `Workflows` Protocol was Temporal-shaped and was not ported, plan step 4).
 - **C. Full TypeScript rewrite** (Next.js + Graphile Worker or Inngest): one language; rewrites the engine and its tests.
 - **D. Go with River**, matching the developer's other product: full rewrite; less mature LLM structured-output tooling.
 

@@ -17,7 +17,7 @@ Weather-cancellation deposits for dive operators, built for the PayPal AI Hackat
 
 ## Reuse
 
-The money-command engine (stored-before-sent PayPal commands with PayPal-Request-Id, reconciliation, mandate check, server-verified citations) comes from `Will413028/dive-trip-agent` at commit `8065eba` (branch `feat/paypal-deposits`): `backend/src/dive_trip/modules/deposits/` and its dependencies, as listed in the plan's step 4. Re-evaluate each mechanism when porting instead of copying it wholesale. Time-based work runs on a PostgreSQL `due_actions` table, not a workflow engine (`docs/adr/2026-10-19-runtime-without-workflow-engine.md`).
+The money engine was ported in plan step 4 from `Will413028/dive-trip-agent` at commit `8065eba` (branch `feat/paypal-deposits`): `money/{paypal,commands,service}.py` from `backend/src/dive_trip/modules/deposits/{paypal,transactions,service}.py`, `settlement/plan.py` from `domain.py` (`settle_diver`), `bootstrap/http_boundary.py` from the same path. The mandate check (`domain.py`, `check_mandate`) and the agent assessor (`assessor.py`, `application/deposits.py`) are ported in steps 5 and 8; re-evaluate each mechanism when porting instead of copying it wholesale. Time-based work runs on a PostgreSQL `due_actions` table, not a workflow engine (`docs/adr/2026-10-19-runtime-without-workflow-engine.md`).
 
 ## Layers
 
