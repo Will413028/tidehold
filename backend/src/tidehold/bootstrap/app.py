@@ -21,6 +21,7 @@ from tidehold.platform.errors import (
 from tidehold.platform.settings import Settings, from_env
 from tidehold.policy import providers
 from tidehold.policy.providers import Provider
+from tidehold.settlement import drafts
 
 STATUS_OF: dict[type[DomainError], int] = {
     Invalid: status.HTTP_400_BAD_REQUEST,
@@ -57,13 +58,16 @@ def create_app(
         paypal = PayPalClient(settings.paypal.client_id, settings.paypal.client_secret)
     built = providers.build(settings.compile_model, settings.model_keys)
     compiler = compiler or built
+    drafter = drafts.Drafter(
+        compiler, settings.model_daily_live_cap, settings.model_daily_draft_cap
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         task = None
         if settings.run_worker:
             task = asyncio.create_task(
-                worker.run_forever(settings.database_url, worker.handlers(paypal))
+                worker.run_forever(settings.database_url, worker.handlers(paypal, drafter))
             )
         yield
         if task is not None:

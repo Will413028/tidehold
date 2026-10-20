@@ -26,6 +26,8 @@ class Settings:
     # Live model calls per UTC day across all workspaces; protects the free-tier quota
     # shared with the fallback demo (threat model surface 3).
     model_daily_live_cap: int = 50
+    # Of those, how many may draft operator asks (step 8a), so compiles keep the rest.
+    model_daily_draft_cap: int = 20
 
     def __post_init__(self) -> None:
         parts = urlsplit(self.public_origin)
@@ -84,4 +86,5 @@ def from_env() -> Settings:
         compile_model=os.environ.get("COMPILE_MODEL", DEFAULT_COMPILE_MODEL),
         model_keys=model_keys_from_env(),
         model_daily_live_cap=int(os.environ.get("MODEL_DAILY_LIVE_CAP", "50")),
+        model_daily_draft_cap=int(os.environ.get("MODEL_DAILY_DRAFT_CAP", "20")),
     )

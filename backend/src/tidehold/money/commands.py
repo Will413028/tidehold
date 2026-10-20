@@ -84,6 +84,7 @@ class NewCommand:
     amount_minor: int
     method: Method | None = None
     target_id: str | None = None
+    proposal_id: UUID | None = None
 
 
 async def _insert(conn: Conn, new: NewCommand) -> DictRow:
@@ -91,8 +92,8 @@ async def _insert(conn: Conn, new: NewCommand) -> DictRow:
     return await insert_returning(
         conn,
         "insert into money_commands (id, payment_id, kind, method, target_id, amount_minor,"
-        " request_id, invoice_id, status)"
-        " values (%s, %s, %s, %s, %s, %s, %s, %s, 'pending') returning *",
+        " request_id, invoice_id, status, proposal_id)"
+        " values (%s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s) returning *",
         (
             command_id,
             new.payment_id,
@@ -102,6 +103,7 @@ async def _insert(conn: Conn, new: NewCommand) -> DictRow:
             new.amount_minor,
             request_id(new.kind, command_id),
             invoice_id(command_id),
+            new.proposal_id,
         ),
     )
 
@@ -188,9 +190,16 @@ async def checkout_attempt(conn: Conn, payment_id: UUID, order_id: str) -> UUID:
     return command_id
 
 
-async def record_command(conn: Conn, payment_id: UUID, kind: Kind, *, amount_minor: int) -> DictRow:
-    """Record a follow-up command against what the payment placed; the unique index refuses
-    a second live command of the same step."""
+async def record_command(
+    conn: Conn,
+    payment_id: UUID,
+    kind: Kind,
+    *,
+    amount_minor: int,
+    proposal_id: UUID | None = None,
+) -> DictRow:
+    """Record a follow-up command against what the payment placed, with the proposal that
+    authorized it (step 8); the unique index refuses a second live command of the same step."""
     if kind == "open":
         raise ValueError("use open_attempt")
     current = await payment(conn, payment_id)
@@ -204,6 +213,7 @@ async def record_command(conn: Conn, payment_id: UUID, kind: Kind, *, amount_min
             kind,
             amount_minor,
             target_id=current[TARGET_OF[kind]],
+            proposal_id=proposal_id,
         ),
     )
 

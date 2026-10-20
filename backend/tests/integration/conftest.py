@@ -31,8 +31,8 @@ ORIGIN = "http://test"
 def _truncate(database_url: str) -> None:
     with psycopg.connect(database_url) as conn:
         conn.execute(
-            "truncate due_actions, guests, payment_events, money_commands, payments, trips,"
-            " policy_versions, model_calls,"
+            "truncate due_actions, credits, money_commands, proposals, cancellations, guests,"
+            " payment_events, payments, trips, policy_versions, model_calls,"
             " warning_replays, official_warnings, corroborations, workspaces"
         )
 

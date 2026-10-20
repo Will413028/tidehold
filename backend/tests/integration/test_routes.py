@@ -59,11 +59,19 @@ def _id_bearing_workspace_routes() -> list[tuple[str, str, tuple[str, ...]]]:
 
 
 ROUTES = _id_bearing_workspace_routes()
+CANCEL_DAY_1 = {"scope": "day", "trip_day": 1, "cause": "weather"}
 
 
 async def _trip(operator: AsyncClient) -> str:
     trip_id: str = (await post_trip(operator)).json()["id"]
     return trip_id
+
+
+async def _proposal(operator: AsyncClient) -> str:
+    trip_id = await _trip(operator)
+    response = await operator.post(f"/api/trips/{trip_id}/cancellations", json=CANCEL_DAY_1)
+    proposal_id: str = response.json()["id"]
+    return proposal_id
 
 
 async def _compilation(operator: AsyncClient) -> str:
@@ -78,10 +86,13 @@ ID_FACTORIES: dict[str, Callable[[AsyncClient], Awaitable[str]]] = {
     "trip_id": _trip,
     "version_id": publish_policy,
     "compilation_id": _compilation,
+    "proposal_id": _proposal,
 }
 # A valid body, so a route that validates its body still answers 404, not 400.
 BODIES: dict[tuple[str, str], dict[str, object]] = {
     ("POST", "/api/trips/{trip_id}/guests"): {"name": "Ana"},
+    ("POST", "/api/trips/{trip_id}/cancellations"): CANCEL_DAY_1,
+    ("POST", "/api/trips/{trip_id}/proposals/{proposal_id}/decision"): {"reject": True},
 }
 
 

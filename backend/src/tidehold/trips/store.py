@@ -3,8 +3,9 @@ a balance payment once the balance hold is requested (`holds` decides when)."""
 
 import secrets
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from psycopg.rows import DictRow
 
@@ -32,11 +33,23 @@ class NewTrip:
     deposit_minor: int
     balance_minor: int
     policy_version_id: UUID
+    timezone: str
+    mandate_guest_minor: int
+    mandate_trip_minor: int
     policy_product: str | None = None
 
 
 def ends_on(starts_on: date, days: int) -> date:
     return starts_on + timedelta(days=days - 1)
+
+
+def day_window(starts_on: date, day: int, timezone: str) -> tuple[datetime, datetime]:
+    """Trip day `day` (1-based) as a local day in the trip's time zone, in UTC instants."""
+    zone = ZoneInfo(timezone)
+    local = starts_on + timedelta(days=day - 1)
+    start = datetime.combine(local, time(), zone)
+    end = datetime.combine(local + timedelta(days=1), time(), zone)
+    return start.astimezone(UTC), end.astimezone(UTC)
 
 
 def _check_binding(version: DictRow, trip: NewTrip) -> None:
@@ -67,8 +80,8 @@ async def create_trip(conn: Conn, workspace_id: UUID, trip: NewTrip) -> UUID:
             conn,
             "insert into trips (workspace_id, name, starts_on, days, site_lat, site_lon,"
             " warning_source, warning_areas, deposit_minor, balance_minor, policy_version_id,"
-            " policy_product) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-            " returning id",
+            " policy_product, timezone, mandate_guest_minor, mandate_trip_minor)"
+            " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) returning id",
             (
                 workspace_id,
                 trip.name,
@@ -82,6 +95,9 @@ async def create_trip(conn: Conn, workspace_id: UUID, trip: NewTrip) -> UUID:
                 trip.balance_minor,
                 trip.policy_version_id,
                 trip.policy_product,
+                trip.timezone,
+                trip.mandate_guest_minor,
+                trip.mandate_trip_minor,
             ),
         )
     trip_id: UUID = row["id"]
@@ -127,6 +143,19 @@ async def guests(conn: Conn, trip_id: UUID) -> list[DictRow]:
     ).fetchall()
 
 
+async def cancel_whole_trip(conn: Conn, trip_id: UUID, now: datetime) -> None:
+    """Mark the trip cancelled as a whole (by settlement, under the trip row's lock): no guest
+    is invited, no balance opens and no payment starts after it."""
+    await conn.execute(
+        "update trips set cancelled_at = coalesce(cancelled_at, %s) where id = %s", (now, trip_id)
+    )
+
+
+async def reopen(conn: Conn, trip_id: UUID) -> None:
+    """Undo `cancel_whole_trip` when the operator withdraws the cancellation."""
+    await conn.execute("update trips set cancelled_at = null where id = %s", (trip_id,))
+
+
 async def guest_by_token(conn: Conn, token: str) -> DictRow:
     row = await (await conn.execute(GUEST_PAYMENTS + " where g.token = %s", (token,))).fetchone()
     if row is None:
@@ -140,13 +169,15 @@ async def invite(conn: Conn, workspace_id: UUID, trip_id: UUID, name: str) -> UU
     async with conn.transaction():
         row = await (
             await conn.execute(
-                "select deposit_minor, balance_requested_at from trips"
+                "select deposit_minor, balance_requested_at, cancelled_at from trips"
                 " where id = %s and workspace_id = %s for update",
                 (trip_id, workspace_id),
             )
         ).fetchone()
         if row is None:
             raise NotFound
+        if row["cancelled_at"] is not None:
+            raise Conflict("TRIP_CANCELLED")
         count = await (
             await conn.execute("select count(*) as n from guests where trip_id = %s", (trip_id,))
         ).fetchone()
@@ -175,13 +206,17 @@ async def invite(conn: Conn, workspace_id: UUID, trip_id: UUID, name: str) -> UU
 
 async def open_balances(conn: Conn, trip_id: UUID, now: datetime) -> int:
     """Open the trip's balance hold: mark it requested and give every guest a balance payment.
-    Idempotent; returns how many payments it created."""
+    Idempotent; returns how many payments it created. A trip cancelled as a whole opens none."""
     async with conn.transaction():
-        await conn.execute(
-            "update trips set balance_requested_at = coalesce(balance_requested_at, %s)"
-            " where id = %s",
-            (now, trip_id),
-        )
+        opened = await (
+            await conn.execute(
+                "update trips set balance_requested_at = coalesce(balance_requested_at, %s)"
+                " where id = %s and cancelled_at is null returning id",
+                (now, trip_id),
+            )
+        ).fetchone()
+        if opened is None:
+            return 0
         return await _open_balances(conn, trip_id)
 
 

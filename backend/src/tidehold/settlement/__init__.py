@@ -1,2 +1,4 @@
-"""settlement: turns what code computed a guest owes into PayPal actions (plan.py); policy
-evaluation, the mandate check and proposals land in plan step 8."""
+"""settlement: from the operator's recorded cancellation to money (plan step 8, D16, D17):
+evaluation of the bound policy and the mandate (evaluate.py), warning matching (matching.py),
+cancellations and proposals (proposals.py), the PayPal actions they decide (plan.py,
+execute.py), the periodic trip check (watch.py) and drafted asks (drafts.py)."""

@@ -118,7 +118,7 @@ async def execute(
     except PayPalUnknownOutcome as error:
         async with conn.transaction():
             await commands.complete(conn, command_id, "unknown", error_code=error.code)
-            await due.schedule(conn, "reconcile_payment", due_at=None, payment_id=payment["id"])
+            await due.schedule(conn, "reconcile_payment", payment["id"], due_at=None)
         return "unknown"
     except PayPalError as error:
         # A refusal of the first send means no money moved. A refusal of a resend may mean

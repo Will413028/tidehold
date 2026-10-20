@@ -3,10 +3,11 @@
 from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, status
 from psycopg.rows import DictRow
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
 
 from tidehold.identity.sessions import current_workspace
 from tidehold.platform.db import Conn, connection
@@ -19,6 +20,18 @@ Db = Annotated[Conn, Depends(connection)]
 AreaCode = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_.-]{1,24}$")]
 # Money inputs are strict: "300" or 300.0 is refused rather than coerced.
 Minor = Annotated[int, Field(strict=True, ge=1, le=10_000_000)]
+Cap = Annotated[int, Field(strict=True, ge=0, le=10_000_000)]
+
+
+def _zone(name: str) -> str:
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError) as error:
+        raise ValueError("unknown time zone") from error
+    return name
+
+
+TimeZone = Annotated[str, StringConstraints(min_length=1, max_length=64), AfterValidator(_zone)]
 
 
 class NewTrip(BaseModel):
@@ -35,6 +48,11 @@ class NewTrip(BaseModel):
     balance_minor: Minor
     policy_version_id: UUID
     policy_product: str | None = Field(default=None, min_length=1, max_length=200)
+    # an IANA name: trip days are local dates (step 8a)
+    timezone: TimeZone
+    # the most the trip's settlements may return without the operator (step 8a)
+    mandate_guest_minor: Cap
+    mandate_trip_minor: Cap
 
 
 class NewGuest(BaseModel):
@@ -66,6 +84,9 @@ class Trip(BaseModel):
     balance_requested_at: datetime | None
     policy_version_id: UUID
     policy_product: str | None
+    timezone: str
+    mandate_guest_minor: int
+    mandate_trip_minor: int
     guests: list[Guest]
 
 

@@ -15,6 +15,8 @@ operator is asked instead).
   (feeds-matrix.md), not from guesswork.
 """
 
+from collections.abc import Mapping
+
 from tidehold.warnings.cap import OfficialWarning, Source
 
 # Each ladder lists one hazard from the least to the most severe; "X or stronger" in an
@@ -64,14 +66,19 @@ def _after_number(value: str) -> str:
     return parts[1] if len(parts) > 1 else parts[0]
 
 
-def event_value(warning: OfficialWarning) -> str:
-    """The catalogue value a recorded warning carries."""
-    match warning.source:
-        case "nws":
-            return warning.event
+def value_of(source: str, event: str, parameters: Mapping[str, str]) -> str:
+    """The catalogue value of a warning's stored fields (a recorded row or a parsed one)."""
+    match source:
         case "meteoalarm":
-            kind = _after_number(warning.parameters.get("awareness_type", ""))
-            colour = _after_number(warning.parameters.get("awareness_level", "")).lower()
+            kind = _after_number(parameters.get("awareness_type", ""))
+            colour = _after_number(parameters.get("awareness_level", "")).lower()
             return f"{kind}:{colour}"
         case "pagasa":
-            return warning.event.split("(")[0].strip()
+            return event.split("(")[0].strip()
+        case _:
+            return event
+
+
+def event_value(warning: OfficialWarning) -> str:
+    """The catalogue value a recorded warning carries."""
+    return value_of(warning.source, warning.event, warning.parameters)

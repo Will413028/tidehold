@@ -90,7 +90,11 @@ def asked(result: dict[str, Any]) -> list[Ruling]:
 Work = Callable[[Provider], Awaitable[dict[str, Any]]]
 
 
-async def _run(ctx: Context, purpose: calls.Purpose, payload: object, work: Work) -> Outcome:
+async def run(
+    ctx: Context, purpose: calls.Purpose, payload: object, work: Work, *, prompt_hash: str
+) -> Outcome:
+    """One model call under the cap, with replay and the no-AI fallback; `prompt_hash` names
+    the prompt `work` sends (compiling and drafting asks use different prompts)."""
     provider = ctx.provider
     if provider is None:
         return Outcome("no_ai", "AI_NOT_CONFIGURED", None)
@@ -98,8 +102,8 @@ async def _run(ctx: Context, purpose: calls.Purpose, payload: object, work: Work
         ctx.workspace_id,
         purpose,
         provider.model,
-        PROMPT_HASH,
-        calls.digest(purpose, provider.model, PROMPT_HASH, payload),
+        prompt_hash,
+        calls.digest(purpose, provider.model, prompt_hash, payload),
     )
     call = await calls.start(ctx.conn, ask, ctx.cap)
     if call["mode"] == "recorded":
@@ -129,7 +133,7 @@ async def compile_wording(ctx: Context, wording: str) -> Outcome:
     async def work(model: Provider) -> dict[str, Any]:
         return compilation_result(wording, await compile_policy(model, wording, SOURCES))
 
-    return await _run(ctx, "compile", [wording, list(SOURCES)], work)
+    return await run(ctx, "compile", [wording, list(SOURCES)], work, prompt_hash=PROMPT_HASH)
 
 
 async def propose(ctx: Context, source: str, quote: str) -> Outcome:
@@ -140,7 +144,7 @@ async def propose(ctx: Context, source: str, quote: str) -> Outcome:
         return {"values": proposal.values, "refused": proposal.refused}
 
     payload = [source, quote, groups]
-    return await _run(ctx, "event_set", payload, work)
+    return await run(ctx, "event_set", payload, work, prompt_hash=PROMPT_HASH)
 
 
 def catalogue_of(source: str) -> list[list[str]]:

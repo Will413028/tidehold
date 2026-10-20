@@ -22,19 +22,31 @@ from psycopg.types.json import Jsonb
 
 from tidehold.platform.db import Conn
 
-Kind = Literal["request_balance", "reconcile_payment"]
+Kind = Literal["request_balance", "reconcile_payment", "check_trip", "settle_proposal", "draft_ask"]
 
 log = logging.getLogger(__name__)
 
-# A handler must finish inside its kind's lease, or another worker takes the action over. Both
-# kinds today are database writes plus PayPal calls of at most 20 s each; a kind that calls a
-# model (plan step 8) gets a lease longer than its model timeout.
+# A handler must finish inside its kind's lease, or another worker takes the action over.
+# Kinds that call PayPal make calls of at most 20 s each; `settle_proposal` makes up to two per
+# guest (12 guests a trip), and `draft_ask` calls a model whose timeout is 90 s
+# (`policy.providers.TIMEOUT_S`), so their leases are longer.
 LEASES: dict[Kind, timedelta] = {
     "request_balance": timedelta(seconds=60),
     "reconcile_payment": timedelta(seconds=60),
+    "check_trip": timedelta(seconds=60),
+    "settle_proposal": timedelta(seconds=600),
+    "draft_ask": timedelta(seconds=120),
 }
 LEASE = max(LEASES.values())
 MAX_ATTEMPTS = 8
+# What each kind acts on; the subject goes in that column (`due_actions_one_subject`).
+SUBJECT: dict[Kind, Literal["trip", "payment", "proposal"]] = {
+    "request_balance": "trip",
+    "reconcile_payment": "payment",
+    "check_trip": "trip",
+    "settle_proposal": "proposal",
+    "draft_ask": "proposal",
+}
 
 
 @dataclass(frozen=True)
@@ -43,6 +55,7 @@ class Action:
     kind: Kind
     trip_id: UUID | None
     payment_id: UUID | None
+    proposal_id: UUID | None
     due_at: datetime
     attempts: int
 
@@ -59,22 +72,17 @@ def backoff(attempts: int) -> timedelta:
     return min(timedelta(seconds=30 * 2 ** (attempts - 1)), timedelta(minutes=30))
 
 
-async def schedule(
-    conn: Conn,
-    kind: Kind,
-    *,
-    due_at: datetime | None,
-    trip_id: UUID | None = None,
-    payment_id: UUID | None = None,
-) -> None:
-    """Ensure one open action of this kind for the subject; an open one is left as it is.
-    Without `due_at`, the action is due a minute from the database's clock."""
+async def schedule(conn: Conn, kind: Kind, subject: UUID, *, due_at: datetime | None) -> None:
+    """Ensure one open action of this kind for the subject (a trip, a payment or a proposal,
+    per `SUBJECT`); an open one is left as it is. Without `due_at`, the action is due a minute
+    from the database's clock."""
+    columns = {"trip": None, "payment": None, "proposal": None, SUBJECT[kind]: subject}
     await conn.execute(
-        "insert into due_actions (kind, trip_id, payment_id, due_at)"
-        " values (%s, %s, %s, coalesce(%s, now() + interval '1 minute'))"
-        " on conflict (kind, coalesce(trip_id, payment_id)) where state in ('pending', 'running')"
-        " do nothing",
-        (kind, trip_id, payment_id, due_at),
+        "insert into due_actions (kind, trip_id, payment_id, proposal_id, due_at)"
+        " values (%s, %s, %s, %s, coalesce(%s, now() + interval '1 minute'))"
+        " on conflict (kind, coalesce(trip_id, payment_id, proposal_id))"
+        " where state in ('pending', 'running') do nothing",
+        (kind, columns["trip"], columns["payment"], columns["proposal"], due_at),
     )
 
 
@@ -92,7 +100,7 @@ async def claim(
             "   where (state = 'pending' and due_at <= %(now)s)"
             "      or (state = 'running' and lease_until <= %(now)s)"
             "   order by due_at, id for update skip locked limit 1)"
-            " returning id, kind, trip_id, payment_id, due_at, attempts",
+            " returning id, kind, trip_id, payment_id, proposal_id, due_at, attempts",
             {"now": now, "leases": Jsonb(seconds)},
         )
     ).fetchone()

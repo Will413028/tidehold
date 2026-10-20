@@ -25,7 +25,7 @@ async def _state(conn: Conn) -> list[tuple[str, int]]:
 
 
 async def test_two_concurrent_claimers_run_an_action_once(conn: Conn, database_url: str) -> None:
-    await due.schedule(conn, "reconcile_payment", payment_id=await _payment(conn), due_at=T0)
+    await due.schedule(conn, "reconcile_payment", await _payment(conn), due_at=T0)
 
     async with await connect(database_url) as a, await connect(database_url) as b:
         async with a.transaction():
@@ -41,7 +41,7 @@ async def test_two_concurrent_claimers_run_an_action_once(conn: Conn, database_u
 
 
 async def test_an_expired_lease_is_reclaimed_exactly_once(conn: Conn, database_url: str) -> None:
-    await due.schedule(conn, "reconcile_payment", payment_id=await _payment(conn), due_at=T0)
+    await due.schedule(conn, "reconcile_payment", await _payment(conn), due_at=T0)
     stalled = await due.claim(conn, T0)
     later = T0 + due.LEASE + timedelta(seconds=1)
 
@@ -57,14 +57,16 @@ async def test_an_expired_lease_is_reclaimed_exactly_once(conn: Conn, database_u
 
 
 async def test_an_action_still_inside_its_lease_is_not_reclaimed(conn: Conn) -> None:
-    await due.schedule(conn, "reconcile_payment", payment_id=await _payment(conn), due_at=T0)
+    await due.schedule(conn, "reconcile_payment", await _payment(conn), due_at=T0)
     await due.claim(conn, T0)
 
-    assert await due.claim(conn, T0 + due.LEASE - timedelta(seconds=1)) is None
+    assert (
+        await due.claim(conn, T0 + due.LEASES["reconcile_payment"] - timedelta(seconds=1)) is None
+    )
 
 
 async def test_a_failing_action_backs_off_then_gives_up(conn: Conn) -> None:
-    await due.schedule(conn, "reconcile_payment", payment_id=await _payment(conn), due_at=T0)
+    await due.schedule(conn, "reconcile_payment", await _payment(conn), due_at=T0)
     runs: list[datetime] = []
 
     async def flaky(_: Conn, __: due.Action, now: datetime) -> None:
@@ -85,14 +87,14 @@ async def test_a_failing_action_backs_off_then_gives_up(conn: Conn) -> None:
 async def test_scheduling_the_same_work_twice_keeps_one_action(conn: Conn) -> None:
     payment_id = await _payment(conn)
 
-    await due.schedule(conn, "reconcile_payment", payment_id=payment_id, due_at=T0)
-    await due.schedule(conn, "reconcile_payment", payment_id=payment_id, due_at=T0 + timedelta(1))
+    await due.schedule(conn, "reconcile_payment", payment_id, due_at=T0)
+    await due.schedule(conn, "reconcile_payment", payment_id, due_at=T0 + timedelta(1))
 
     assert await _state(conn) == [("pending", 0)]
 
 
 async def test_each_kind_is_claimed_under_its_own_lease(conn: Conn) -> None:
-    await due.schedule(conn, "reconcile_payment", payment_id=await _payment(conn), due_at=T0)
+    await due.schedule(conn, "reconcile_payment", await _payment(conn), due_at=T0)
     leases: dict[due.Kind, timedelta] = {
         "request_balance": timedelta(minutes=5),
         "reconcile_payment": timedelta(seconds=7),

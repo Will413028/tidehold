@@ -18,7 +18,7 @@ from psycopg.types.json import Jsonb
 from tidehold.platform.db import Conn, insert_returning
 from tidehold.platform.errors import Conflict, NotFound
 
-Purpose = Literal["compile", "event_set"]
+Purpose = Literal["compile", "event_set", "draft_ask"]
 
 # Serialises cap checks across requests; released when the transaction ends.
 _CAP_LOCK = "tidehold.model_calls.cap"
@@ -45,6 +45,8 @@ class Ask:
 class Cap:
     daily: int
     today: date
+    # a tighter daily cap for this purpose alone, so drafting asks leaves compiles their share
+    purpose_daily: int | None = None
 
 
 async def start(conn: Conn, ask: Ask, cap: Cap) -> DictRow:
@@ -59,8 +61,18 @@ async def start(conn: Conn, ask: Ask, cap: Cap) -> DictRow:
                 (cap.today,),
             )
         ).fetchone()
+        used_by_purpose = await (
+            await conn.execute(
+                "select count(*) as n from model_calls"
+                " where day = %s and mode = 'live' and purpose = %s",
+                (cap.today, ask.purpose),
+            )
+        ).fetchone()
         row = (ask.workspace_id, ask.purpose, cap.today, ask.input_digest, ask.model)
-        if used is not None and used["n"] < cap.daily:
+        purpose_room = cap.purpose_daily is None or (
+            used_by_purpose is not None and used_by_purpose["n"] < cap.purpose_daily
+        )
+        if used is not None and used["n"] < cap.daily and purpose_room:
             return await insert_returning(
                 conn,
                 "insert into model_calls (workspace_id, purpose, day, mode, status,"

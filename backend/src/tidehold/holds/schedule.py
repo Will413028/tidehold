@@ -25,7 +25,7 @@ async def ensure_schedules(conn: Conn) -> int:
     rows = await (
         await conn.execute(
             "select t.id, t.starts_on, t.days from trips t"
-            " where t.balance_requested_at is null and not exists ("
+            " where t.balance_requested_at is null and t.cancelled_at is null and not exists ("
             "   select 1 from due_actions d where d.trip_id = t.id and d.kind = 'request_balance')"
         )
     ).fetchall()
@@ -33,7 +33,7 @@ async def ensure_schedules(conn: Conn) -> int:
         await due.schedule(
             conn,
             "request_balance",
-            trip_id=row["id"],
+            row["id"],
             due_at=balance_opens_at(row["starts_on"], row["days"]),
         )
     return len(rows)

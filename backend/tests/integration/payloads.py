@@ -41,6 +41,9 @@ TRIP: dict[str, Any] = {
     "warning_areas": ["041000000"],
     "deposit_minor": 5000,
     "balance_minor": 30000,
+    "timezone": "Asia/Manila",
+    "mandate_guest_minor": 35000,
+    "mandate_trip_minor": 200000,
 }
 
 
