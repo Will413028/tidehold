@@ -55,6 +55,7 @@ tidehold must act at specific times per trip: request the balance hold at T-(29 
 ## Review Notes
 
 - 2026-10-19 (plan step 6): "the demo can advance a workspace's clock to the next action" is superseded by D12 (trips and holds use real time; recorded warnings are replayed with an offset). The worker passes the wall clock into every claim; tests pass their own.
+- 2026-10-20 (plan D17): "cancellation marks pending actions superseded" is replaced by state checks: every handler re-reads trip state before acting, which an action already running needs anyway; no `superseded` state is added, since nothing reads it.
 
 ## Related
 
