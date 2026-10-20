@@ -892,3 +892,68 @@ async def test_evidence_without_a_forecast_still_shows_the_warnings(
         "attribution": evidence["forecast"]["attribution"],
     }
     assert len(evidence["warnings"]) == 1
+
+
+async def _recorded(conn: Conn, warning: OfficialWarning = GALE) -> str:
+    """`warning` recorded long ago, as the recorder's files are read in (step 7)."""
+    await store.record(conn, warning, warning.sent)
+    row = await (
+        await conn.execute(
+            "select id from official_warnings where identifier = %s", (warning.identifier,)
+        )
+    ).fetchone()
+    assert row is not None
+    return str(row["id"])
+
+
+async def test_replaying_a_recorded_warning_opens_its_ask_before_answering(
+    operator: AsyncClient, conn: Conn
+) -> None:
+    trip = await _trip(operator, [GALE_RULE], starts_on=_today().isoformat(), days=2)
+    warning_id = await _recorded(conn)
+
+    response = await operator.post(
+        f"/api/trips/{trip['id']}/replays", json={"warning_id": warning_id}
+    )
+
+    assert response.status_code == 201, response.text
+    [warning] = response.json()["warnings"]
+    assert warning["replayed"] is True
+    asks = [p for p in await _proposals(operator, trip["id"]) if p["kind"] == "warning"]
+    assert sorted(a["subject"] for a in asks) == ["day:1:Gale Warning", "day:2:Gale Warning"]
+
+
+async def test_a_replay_is_refused_for_another_source_or_a_cancelled_trip(
+    operator: AsyncClient, conn: Conn
+) -> None:
+    trip = await _trip(operator, [WHOLE_TRIP_RULE], starts_on=_today().isoformat())
+    warning_id = await _recorded(conn)
+    other = await _recorded(conn, replace(GALE, source="meteoalarm", identifier="ma-1"))
+    path = f"/api/trips/{trip['id']}/replays"
+
+    mismatch = await operator.post(path, json={"warning_id": other})
+    unknown = await operator.post(path, json={"warning_id": str(UUID(int=1))})
+    await _cancel(operator, trip["id"], "rest", 1)
+    cancelled = await operator.post(path, json={"warning_id": warning_id})
+
+    assert (mismatch.status_code, mismatch.json()["detail"]) == (400, "WARNING_SOURCE_MISMATCH")
+    assert unknown.status_code == 404
+    assert (cancelled.status_code, cancelled.json()["detail"]) == (409, "TRIP_CANCELLED")
+
+
+async def test_recorded_warnings_are_listed_by_source_and_area_newest_first(
+    operator: AsyncClient, conn: Conn
+) -> None:
+    newer = replace(
+        GALE, identifier="gale-2", sent=GALE.sent + timedelta(days=1), area_codes=("PZZ999",)
+    )
+    elsewhere = replace(GALE, source="meteoalarm", identifier="ma-1")
+    for warning in (GALE, newer, elsewhere):
+        await _recorded(conn, warning)
+
+    every = await operator.get("/api/recorded-warnings", params={"source": "nws"})
+    one_area = await operator.get("/api/recorded-warnings", params={"source": "nws", "area": AREA})
+
+    assert [w["identifier"] for w in every.json()] == ["gale-2", GALE.identifier]
+    assert [w["identifier"] for w in one_area.json()] == [GALE.identifier]
+    assert every.json()[0]["recorded_at"] == newer.sent.isoformat().replace("+00:00", "Z")

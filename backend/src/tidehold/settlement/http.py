@@ -11,11 +11,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tidehold.identity.sessions import current_workspace
 from tidehold.platform.db import Conn, connection
-from tidehold.platform.errors import Unavailable
-from tidehold.settlement import matching
+from tidehold.platform.errors import Conflict, Invalid, Unavailable
+from tidehold.settlement import matching, watch
 from tidehold.settlement import proposals as store
 from tidehold.trips import store as trips
 from tidehold.warnings import openmeteo
+from tidehold.warnings import store as warnings
+from tidehold.warnings.cap import Source
 
 router = APIRouter(prefix="/api")
 
@@ -188,13 +190,66 @@ async def _forecast(request: Request, conn: Conn, trip: Any, now: datetime) -> F
     )
 
 
+async def _evidence(request: Request, conn: Conn, trip: Any, now: datetime) -> Evidence:
+    rows = await matching.in_force(conn, trip, range(1, trip["days"] + 1), now)
+    return Evidence(warnings=_warnings(rows), forecast=await _forecast(request, conn, trip, now))
+
+
 @router.get("/trips/{trip_id}/evidence")
 async def trip_evidence(
     trip_id: UUID, request: Request, workspace_id: Workspace, conn: Db
 ) -> Evidence:
     """What the operator decides a cancellation from: the warnings visible now in force on any
     local trip day, and the site's marine forecast."""
+    trip = await trips.trip(conn, workspace_id, trip_id)
+    return await _evidence(request, conn, trip, datetime.now(UTC))
+
+
+class Recorded(BaseModel):
+    id: UUID
+    source: str
+    identifier: str
+    event: str
+    headline: str | None
+    area_desc: str
+    area_codes: list[str]
+    onset: datetime
+    expires: datetime
+    recorded_at: datetime
+
+
+AreaCode = Annotated[str, Field(pattern=r"^[A-Za-z0-9_.-]{1,24}$")]
+
+
+@router.get("/recorded-warnings")
+async def recorded_warnings(
+    source: Source, conn: Db, area: AreaCode | None = None
+) -> list[Recorded]:
+    """The recorded warnings an operator can replay into a demo (D12), newest first; recorded
+    feeds are public, and the router's session dependency still requires a workspace."""
+    return [Recorded(**row) for row in await warnings.recorded(conn, source, area)]
+
+
+class NewReplay(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    warning_id: UUID
+
+
+@router.post("/trips/{trip_id}/replays", status_code=status.HTTP_201_CREATED)
+async def replay_warning(
+    trip_id: UUID, body: NewReplay, request: Request, workspace_id: Workspace, conn: Db
+) -> Evidence:
+    """Replay a recorded warning into the workspace as fetched now (D12) and check the trip at
+    once, so the asks it calls for exist when this answers."""
     now = datetime.now(UTC)
     trip = await trips.trip(conn, workspace_id, trip_id)
-    rows = await matching.in_force(conn, trip, range(1, trip["days"] + 1), now)
-    return Evidence(warnings=_warnings(rows), forecast=await _forecast(request, conn, trip, now))
+    if trip["cancelled_at"] is not None:
+        raise Conflict("TRIP_CANCELLED")
+    warning = await warnings.warning(conn, body.warning_id)
+    if warning["source"] != trip["warning_source"]:
+        raise Invalid("WARNING_SOURCE_MISMATCH")
+    async with conn.transaction():
+        await warnings.replay(conn, workspace_id, body.warning_id, now)
+        await watch.check(conn, trip_id, now)
+    return await _evidence(request, conn, await trips.trip(conn, workspace_id, trip_id), now)

@@ -107,6 +107,30 @@ async def replay(conn: Conn, workspace_id: UUID, warning_id: UUID, fetched_at: d
     return replay_id
 
 
+async def recorded(conn: Conn, source: Source, area: str | None, limit: int = 50) -> list[DictRow]:
+    """Recorded `Actual` warnings of `source` (for `area` when given), newest first: what an
+    operator can replay into a demo (D12)."""
+    return await (
+        await conn.execute(
+            "select id, source, identifier, event, headline, area_desc, area_codes, onset,"
+            " expires, fetched_at as recorded_at from official_warnings"
+            " where source = %s and status = 'Actual' and msg_type <> 'Cancel'"
+            " and (%s::text is null or %s = any(area_codes))"
+            " order by fetched_at desc, id limit %s",
+            (source, area, area, limit),
+        )
+    ).fetchall()
+
+
+async def warning(conn: Conn, warning_id: UUID) -> DictRow:
+    row = await (
+        await conn.execute("select * from official_warnings where id = %s", (warning_id,))
+    ).fetchone()
+    if row is None:
+        raise NotFound
+    return row
+
+
 # A replacing message only replaces within its own timeline: live by live, and replayed by
 # replayed in the same workspace, so a live Update fetched long ago cannot hide a replay.
 EVIDENCE = """

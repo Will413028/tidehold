@@ -10,6 +10,7 @@ what it finds (D17).
 
 from datetime import datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 from psycopg.rows import DictRow
 
@@ -147,10 +148,16 @@ async def _guest_asks(conn: Conn, trip: DictRow, now: datetime) -> None:
 async def check_trip(conn: Conn, action: due.Action, now: datetime) -> None:
     if action.trip_id is None:
         raise ValueError("check_trip needs a trip")
+    await check(conn, action.trip_id, now)
+
+
+async def check(conn: Conn, trip_id: UUID, now: datetime) -> None:
+    """Open the asks the trip's state calls for now; the periodic action and a replay (step 9)
+    both run it."""
     async with conn.transaction():
         # locked like a cancellation, so an ask is never opened on a day cancelled meanwhile
         trip = await (
-            await conn.execute("select * from trips where id = %s for update", (action.trip_id,))
+            await conn.execute("select * from trips where id = %s for update", (trip_id,))
         ).fetchone()
         if trip is None or trip["cancelled_at"] is not None:
             return

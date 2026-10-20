@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from uuid import UUID
 
 import pytest
 from fastapi import APIRouter, FastAPI
@@ -93,6 +94,7 @@ BODIES: dict[tuple[str, str], dict[str, object]] = {
     ("POST", "/api/trips/{trip_id}/guests"): {"name": "Ana"},
     ("POST", "/api/trips/{trip_id}/cancellations"): CANCEL_DAY_1,
     ("POST", "/api/trips/{trip_id}/proposals/{proposal_id}/decision"): {"reject": True},
+    ("POST", "/api/trips/{trip_id}/replays"): {"warning_id": str(UUID(int=1))},
 }
 
 
