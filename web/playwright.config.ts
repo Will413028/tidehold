@@ -10,6 +10,9 @@ export default defineConfig({
   workers: 1,
   forbidOnly: true,
   retries: 0,
+  // Under make check each API call took 1-2 s (measured 2026-10-20 from a failing trace: a
+  // backend connection per request through Docker's port), so a three-call step can pass 5 s.
+  expect: { timeout: 15_000 },
   // `make e2e` copies the junit report next to the other suites' (quality-lock.json counts it)
   reporter: [["list"], ["junit", { outputFile: "test-results/junit.xml" }]],
   use: { baseURL: WEB, trace: "retain-on-failure" },

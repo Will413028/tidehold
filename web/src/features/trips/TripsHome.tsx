@@ -6,6 +6,7 @@ import type { PolicyVersion } from "@/lib/api-types";
 import { formatDateRange } from "@/lib/dates";
 import { type Column, Grid } from "@/lib/grid";
 import { formatUsd } from "@/lib/money";
+import { OperatorNav } from "@/lib/nav";
 import { TripCard } from "./TripCard";
 import { TripForm } from "./TripForm";
 import type { Trip } from "./types";
@@ -44,9 +45,7 @@ export function TripsHome() {
 
   return (
     <main>
-      <nav>
-        <a href="/">Trips</a> · <a href="/policies">Policies</a>
-      </nav>
+      <OperatorNav />
       <h1>Trips</h1>
       <Grid label="Trips" rows={trips} columns={COLUMNS} rowId={(t) => t.id} />
       {trips.map((trip) => (

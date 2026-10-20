@@ -24,7 +24,7 @@ test("an operator creates a trip bound to a published policy", async ({ page }) 
   await expect(page.getByRole("note")).toContainText("do not enter real personal data");
   await expect(page.getByText("Publish a cancellation policy first")).toBeVisible();
 
-  // the policy screen is unit 4; publish through the API with this browser's session
+  // policies.spec.ts covers the policy screen; this spec publishes through the API (same session)
   const origin = { Origin: new URL(page.url()).origin };
   expect((await page.request.post("/api/workspaces", { headers: origin, data: {} })).status()).toBe(201);
   expect((await page.request.post("/api/policy-versions", { headers: origin, data: POLICY })).status()).toBe(
