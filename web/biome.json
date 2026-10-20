@@ -1,6 +1,8 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
-  "files": { "includes": ["**", "!node_modules", "!.next", "!next-env.d.ts"] },
+  "files": {
+    "includes": ["**", "!node_modules", "!.next", "!next-env.d.ts", "!test-results", "!playwright-report"]
+  },
   "formatter": { "enabled": true, "indentStyle": "space", "lineWidth": 110 },
   "assist": { "actions": { "source": { "organizeImports": "on" } } },
   "linter": {

@@ -11,3 +11,6 @@ next-env.d.ts
 *.tsbuildinfo
 build/
 .coverage
+# Playwright output (make e2e)
+web/test-results/
+web/playwright-report/

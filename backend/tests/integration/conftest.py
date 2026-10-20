@@ -1,15 +1,14 @@
 """Integration tests run against a throwaway PostgreSQL 18 container, migrated once per session."""
 
 from collections.abc import AsyncIterator, Iterator
-from datetime import date, timedelta
 
-import httpx2
 import psycopg
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from testcontainers.community.postgres import PostgresContainer
 
+from tests.integration.fake_forecast import FakeForecast
 from tests.integration.fake_model import FakeModel
 from tests.integration.fake_paypal import FakePayPal
 from tests.integration.payloads import POLICY
@@ -42,27 +41,6 @@ def _truncate(database_url: str) -> None:
 @pytest.fixture
 def paypal() -> FakePayPal:
     return FakePayPal()
-
-
-class FakeForecast:
-    """Open-Meteo's marine API: every requested day gets a wave height, unless `fail`."""
-
-    def __init__(self) -> None:
-        self.requests: list[httpx2.Request] = []
-        self.fail = False
-
-    def client(self) -> httpx2.AsyncClient:
-        return httpx2.AsyncClient(transport=httpx2.MockTransport(self.handle))
-
-    def handle(self, request: httpx2.Request) -> httpx2.Response:
-        self.requests.append(request)
-        if self.fail:
-            return httpx2.Response(502)
-        start = date.fromisoformat(request.url.params["start_date"])
-        end = date.fromisoformat(request.url.params["end_date"])
-        days = [start + timedelta(days=n) for n in range((end - start).days + 1)]
-        daily = {"time": [d.isoformat() for d in days], "wave_height_max": [1.5] * len(days)}
-        return httpx2.Response(200, json={"daily": daily})
 
 
 @pytest.fixture

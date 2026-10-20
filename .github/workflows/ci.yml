@@ -34,6 +34,8 @@ jobs:
           node-version: "24"
       - run: uv sync --project backend --frozen
       - run: pnpm --dir web install --frozen-lockfile
+      # system libraries for Chromium; make e2e downloads the browser itself
+      - run: pnpm --dir web exec playwright install-deps chromium
       - run: make check
       - name: A commit that loosens quality-lock.json says why
         env:

@@ -1,6 +1,6 @@
 # `make check` is the gate: lefthook runs it (with `make security`) before every push,
 # and CI runs the same targets.
-.PHONY: check reports lint typecheck arch unit integration locks coverage security dev-db dev-backend dev-web
+.PHONY: check reports lint typecheck arch unit integration e2e locks coverage security dev-db dev-backend dev-web
 
 WEB := pnpm --dir web
 # Test reports read by `locks`; `check` starts from an empty directory so a suite that stops
@@ -9,7 +9,7 @@ REPORTS := $(CURDIR)/build/test-reports
 # unittest prints its summary to stderr: keep it for `locks`, show it, keep the exit status.
 UNITTEST = python3 -m unittest -q $(1) 2> $(REPORTS)/$(2).txt; s=$$?; cat $(REPORTS)/$(2).txt >&2; exit $$s
 
-check: reports lint typecheck arch unit integration locks
+check: reports lint typecheck arch unit integration e2e locks
 
 reports:
 	rm -rf $(REPORTS) && mkdir -p $(REPORTS)
@@ -41,6 +41,15 @@ unit:
 integration:
 	mkdir -p $(REPORTS)
 	cd backend && uv run --frozen pytest -q tests/integration --junitxml=$(REPORTS)/backend-integration.xml
+
+# The demo path in Chromium on desktop and mobile widths (Playwright): builds the web app and
+# starts backend/tests/e2e/server.py (fakes for PayPal, the model and Open-Meteo, a throwaway
+# PostgreSQL 18; needs Docker). The browser comes from Playwright's CDN, pinned by its version.
+e2e:
+	mkdir -p $(REPORTS)
+	cd web && pnpm exec playwright install chromium
+	cd web && pnpm exec playwright test
+	cp web/test-results/junit.xml $(REPORTS)/web-e2e.xml
 
 # Suppression comments may only go down and executed tests only up (quality-lock.json).
 locks:
