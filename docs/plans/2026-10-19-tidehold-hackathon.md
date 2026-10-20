@@ -48,7 +48,7 @@
 
 - Do: requirements R1–R18 in `requirements.md`.
 - Don't: currencies other than USD in v1 (amounts are USD minor units end to end); real operator onboarding or live PayPal (contract: sandbox only); guest accounts (link only); vouchers as PayPal objects (no native voucher); trips that cannot settle inside one authorization's validity after D11 (rejected at trip creation); dive-safety advice; Vault (not offered to the target merchant countries).
-- Deferred: refund-after-capture demo beyond one example (trigger: time left after step 12); CAP regions beyond D4 (trigger: step 1 shows them reachable and time left); paid model tier (trigger: D6 before judging); tear-down of the dive-trip-agent stack (trigger: hackathon results announced).
+- Deferred: refund-after-capture demo beyond one example (trigger: time left after step 12); CAP regions beyond D4 (trigger: step 1 shows them reachable and time left); paid model tier (trigger: judging starts, after the 2026-11-12 deadline; D6); tear-down of the dive-trip-agent stack (trigger: hackathon results announced).
 
 ## Steps
 
@@ -104,7 +104,7 @@
   - Rollback: `docker compose -p tidehold down` without touching the fallback's volumes.
   - Acceptance: public URL loads; judge path works in a fresh browser; after deploy `https://dive-deposits.tail357fef.ts.net/deposits` still returns 200; after the nightly job every authorization in tidehold's money commands is voided or captured (per-ID PayPal query in `docs/evidence.md`) and the fallback's holds are untouched; the reconciliation log exists; workspace-creation cap test; nightly job ran once.
   - Needs a human: approve the deploy; approve the new Tailscale node login if a new node is used.
-- [ ] **11. Model order and reliability** (blocked by: D6, steps 2 and 10; target 2026-11-06)
+- [ ] **11. Model order and reliability** (blocked by: steps 2 and 10; target 2026-11-06)
   - Scope: provider order for compiling and for drafting asks and explanations (D16) from the benchmark; confirm cap and no-AI path on the deployed demo.
   - Acceptance: with the provider key path pointed at an invalid key file (env switch), the UI shows the no-AI path; mutation: remove the cap check and the cap test fails; one live run on the demo in `docs/evidence.md`.
 - [ ] **12. Devpost assets and video** (blocked by: steps 10–11; target 2026-11-08)
@@ -134,8 +134,8 @@
 - **D5 Demo hosting** (status: decided 2026-10-19, developer: A; blocks: 10)
   - A: the existing VM, new isolated compose project and hostname — known path, no cost (recommended)
   - B: Render — eligible for "Best Use of Render" (USD 500–1,000 in credits), new platform risk
-- **D6 Model provider and paid tier** (status: open; provisional ranking after step 2, final before judging; blocks: 5, 11)
-  - A: free tiers in benchmark order with fallback; buy a paid tier for the winner before judging (recommended)
+- **D6 Model provider and paid tier** (status: decided 2026-10-20, developer: A, the paid tier is bought when judging starts, not before; blocks: none)
+  - A: free tiers in benchmark order with fallback; buy a paid tier for the winner before judging (chosen; bought when judging starts, for the model first in the ranking at that time, currently Groq `openai/gpt-oss-120b`)
   - B: free tiers only through judging
   - Provisional ranking (step 2, `model-benchmark.md`): Groq `openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.8-27b`. Unchanged after the step 5 rerun at the tuned prompt (2026-10-20); held-out quality did not move with dev tuning. The Gemini models are unranked: the free tier allows 20 requests per model per day (`gemini-3.1-pro-preview` none), and the benchmark needs at least 26. Before the final D6 they are measured on a paid tier or on a key the fallback does not share; a benchmark never runs Gemini on the shared key again, because that spends the fallback's Gemini fallback for the day.
 - **D7 Product-risk validation** (status: decided 2026-10-19, developer: B, nobody available to ask; blocks: none, feeds step 12)
@@ -168,7 +168,7 @@
   - Not adopted: a commit-size check (solo developer, no reviewer; the step 4 port is committed per module and design-reviewed instead; trigger: a second contributor or PRs); idle timeout and logout of other devices (trigger: a real operator signs in or sandbox is left); daily reconciliation as a separate service and error tracking before real money (trigger: any non-sandbox credential).
 - **D16 Settlement triggers and the model's role** (status: decided 2026-10-19, developer, after a critiqued brief and two independent drafts; ADR: `docs/adr/2026-10-19-settlement-triggers-and-model-role.md`; blocks: 2, 5, 8, 9)
   - Conclusion: settlement starts only from the operator's recorded cancellation; a rule may also require an official warning, matched in code against an operator-confirmed event set; the model works only at compile time (rules, needs-ruling items, event-set proposals) and drafts asks and explanations; the runtime assessor is not ported. Step 2 measures the production compile path with a guideline, dev and held-out splits and precision and recall; fixtures are committed as excerpts. CAP lifecycle (status, Update and Cancel) landed in 1b2bfff.
-Decision order: D1, D3, D4, D5, D7, D10, D11, D12, D13, D14, D15, D16 decided 2026-10-19; D6 provisional after step 2; D8 after step 12.
+Decision order: D1, D3, D4, D5, D7, D10, D11, D12, D13, D14, D15, D16 decided 2026-10-19; D6 decided 2026-10-20; D8 after step 12.
 
 ## Progress
 
