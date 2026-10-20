@@ -108,17 +108,20 @@ def check(
     return Checked(checked, _check_rulings(asked, answers, wording), next(iter(sources), None))
 
 
-async def publish(conn: Conn, workspace_id: UUID, wording: str, checked: Checked) -> UUID:
+async def publish(
+    conn: Conn, workspace_id: UUID, wording: str, checked: Checked, compilation_id: UUID | None
+) -> UUID:
     row = await insert_returning(
         conn,
-        "insert into policy_versions (workspace_id, wording, rules, rulings, warning_source)"
-        " values (%s, %s, %s, %s, %s) returning id",
+        "insert into policy_versions (workspace_id, wording, rules, rulings, warning_source,"
+        " compilation_id) values (%s, %s, %s, %s, %s, %s) returning id",
         (
             workspace_id,
             wording,
             Jsonb(checked.rules),
             Jsonb(checked.rulings),
             checked.warning_source,
+            compilation_id,
         ),
     )
     version_id: UUID = row["id"]

@@ -13,6 +13,8 @@ from typing import Any, Protocol
 
 import httpx2 as httpx
 
+from tidehold.platform.settings import ModelKeys
+
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 MAX_OUTPUT_TOKENS = 8192
@@ -174,3 +176,21 @@ class Gemini:
         if candidate.get("finishReason") != "STOP":
             raise ProviderError(f"finishReason {candidate.get('finishReason')}")
         return Completion(text, latency)
+
+
+VENDORS: dict[str, type[Groq] | type[Gemini]] = {"groq": Groq, "gemini": Gemini}
+# Exact model IDs measured by the compile benchmark (`model-benchmark.md`, D6, D15); the
+# product runs only these, so a provider cannot swap the model behind an alias.
+BENCHMARKED = frozenset(
+    {"groq:openai/gpt-oss-120b", "groq:openai/gpt-oss-20b", "groq:qwen/qwen3.8-27b"}
+)
+
+
+def build(spec: str, keys: ModelKeys) -> Groq | Gemini | None:
+    """The provider for `vendor:model`, or None without its key (the no-AI path). A model the
+    benchmark did not measure is refused even without a key, so a typo fails at start."""
+    if spec not in BENCHMARKED:
+        raise ValueError(f"model {spec!r} is not one the benchmark measured")
+    vendor, model = spec.split(":", 1)
+    key = keys.groq if vendor == "groq" else keys.gemini
+    return VENDORS[vendor](httpx.AsyncClient(), key, model) if key else None

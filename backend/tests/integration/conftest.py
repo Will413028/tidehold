@@ -8,7 +8,9 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from testcontainers.community.postgres import PostgresContainer
 
+from tests.integration.fake_model import FakeModel
 from tests.integration.fake_paypal import FakePayPal
+from tests.integration.payloads import POLICY
 from tidehold.bootstrap.app import create_app
 from tidehold.platform.db import Conn, connect
 from tidehold.platform.migrate import migrate
@@ -30,7 +32,7 @@ def _truncate(database_url: str) -> None:
     with psycopg.connect(database_url) as conn:
         conn.execute(
             "truncate due_actions, guests, payment_events, money_commands, payments, trips,"
-            " policy_versions,"
+            " policy_versions, model_calls,"
             " warning_replays, official_warnings, corroborations, workspaces"
         )
 
@@ -41,9 +43,27 @@ def paypal() -> FakePayPal:
 
 
 @pytest.fixture
-def app(database_url: str, paypal: FakePayPal) -> Iterator[FastAPI]:
-    settings = Settings(database_url=database_url, public_origin=ORIGIN)
-    yield create_app(settings, paypal=paypal.client())
+def model() -> FakeModel:
+    """The compiler's model; it compiles `POLICY`'s wording into `POLICY`'s rules."""
+    fake = FakeModel()
+    fake.answer(POLICY["wording"], POLICY["rules"], [])
+    return fake
+
+
+@pytest.fixture
+def daily_cap() -> int:
+    """Live model calls per day; a test lowers it with `@pytest.mark.parametrize`."""
+    return 50
+
+
+@pytest.fixture
+def app(
+    database_url: str, paypal: FakePayPal, model: FakeModel, daily_cap: int
+) -> Iterator[FastAPI]:
+    settings = Settings(
+        database_url=database_url, public_origin=ORIGIN, model_daily_live_cap=daily_cap
+    )
+    yield create_app(settings, paypal=paypal.client(), compiler=model)
     _truncate(database_url)
 
 

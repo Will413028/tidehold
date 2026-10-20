@@ -19,6 +19,8 @@ from tidehold.platform.errors import (
     Unavailable,
 )
 from tidehold.platform.settings import Settings, from_env
+from tidehold.policy import providers
+from tidehold.policy.providers import Provider
 
 STATUS_OF: dict[type[DomainError], int] = {
     Invalid: status.HTTP_400_BAD_REQUEST,
@@ -44,10 +46,17 @@ async def invalid_request(_: Request, __: Exception) -> JSONResponse:
     return JSONResponse({"detail": "INVALID_REQUEST"}, status_code=400)
 
 
-def create_app(settings: Settings | None = None, *, paypal: PayPalClient | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    paypal: PayPalClient | None = None,
+    compiler: Provider | None = None,
+) -> FastAPI:
     settings = settings or from_env()
     if paypal is None and settings.paypal is not None:
         paypal = PayPalClient(settings.paypal.client_id, settings.paypal.client_secret)
+    built = providers.build(settings.compile_model, settings.model_keys)
+    compiler = compiler or built
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -61,6 +70,8 @@ def create_app(settings: Settings | None = None, *, paypal: PayPalClient | None 
             task.cancel()
         if paypal is not None:
             await paypal.aclose()
+        if built is not None:
+            await built.client.aclose()
 
     # No interactive docs: every route must be classified in the route table.
     app = FastAPI(
@@ -69,6 +80,7 @@ def create_app(settings: Settings | None = None, *, paypal: PayPalClient | None 
     app.state.settings = settings
     app.state.paypal = paypal
     app.state.paypal_client_id = settings.paypal.client_id if settings.paypal else None
+    app.state.compiler = compiler
     app.add_exception_handler(DomainError, domain_error)
     app.add_exception_handler(RequestValidationError, invalid_request)
     routes.mount(app)

@@ -2,6 +2,9 @@ import os
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
+# D6 provisional ranking, first place (model-benchmark.md).
+DEFAULT_COMPILE_MODEL = "groq:openai/gpt-oss-120b"
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -16,6 +19,13 @@ class Settings:
     paypal: "PayPalCredentials | None" = None
     # The due_actions worker runs inside the API process (one host, runtime ADR).
     run_worker: bool = False
+    # The policy compiler's model as `vendor:exact-model-id` (D6 provisional ranking) and
+    # its key; without a key the operator writes rules by hand.
+    compile_model: str = DEFAULT_COMPILE_MODEL
+    model_keys: "ModelKeys" = field(default_factory=lambda: ModelKeys())
+    # Live model calls per UTC day across all workspaces; protects the free-tier quota
+    # shared with the fallback demo (threat model surface 3).
+    model_daily_live_cap: int = 50
 
     def __post_init__(self) -> None:
         parts = urlsplit(self.public_origin)
@@ -71,4 +81,7 @@ def from_env() -> Settings:
         paypal_daily_open_cap=int(os.environ.get("PAYPAL_DAILY_OPEN_CAP", "30")),
         paypal=paypal_from_env() if "PAYPAL_CLIENT_ID" in os.environ else None,
         run_worker=os.environ.get("RUN_WORKER", "true") != "false",
+        compile_model=os.environ.get("COMPILE_MODEL", DEFAULT_COMPILE_MODEL),
+        model_keys=model_keys_from_env(),
+        model_daily_live_cap=int(os.environ.get("MODEL_DAILY_LIVE_CAP", "50")),
     )
