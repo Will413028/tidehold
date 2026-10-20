@@ -32,7 +32,7 @@ async def health_check() -> dict[str, str]:
 
 TABLE: dict[Access, list[APIRouter]] = {
     Access.WORKSPACE: [sessions.router, policy.router, trips.router, settlement.router],
-    Access.GUEST: [holds.router],
+    Access.GUEST: [holds.router, settlement.guest_router],
     Access.PUBLIC: [health, sessions.public_router, holds.public_router],
 }
 

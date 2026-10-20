@@ -1000,3 +1000,88 @@ async def test_failed_actions_of_a_trip_are_grouped_per_kind_and_subject(
         ("reconcile_payment", 1, "PAYPAL_OUTCOME_STILL_UNKNOWN"),
         ("settle_proposal", 1, "RuntimeError"),
     ]
+
+
+async def _settlement_view(client: AsyncClient, token: str) -> dict[str, Any]:
+    response = await client.get(f"/api/guest/{token}/settlement")
+    assert response.status_code == 200, response.text
+    view: dict[str, Any] = response.json()
+    return view
+
+
+async def test_a_guest_sees_the_cancellation_the_warning_the_clause_and_its_own_outcome(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+) -> None:
+    trip = await _trip(operator, [GALE_RULE])
+    ana = await _guest(operator, client, conn, paypal, trip["id"])
+    invited = await operator.post(f"/api/trips/{trip['id']}/guests", json={"name": "Ben"})
+    ben = invited.json()["guests"][-1]["token"]
+    assert (await client.post(f"/api/guest/{ben}/deposit/test-card")).status_code == 200
+    await _replayed(conn, trip["id"])
+    await _cancel(operator, trip["id"], "day", 2)
+
+    response = await client.get(f"/api/guest/{ana}/settlement")
+    [settlement] = response.json()["settlements"]
+
+    assert settlement["state"] == "accepted"
+    assert (settlement["days"], settlement["cause"]) == ([2], "weather")
+    [warning] = settlement["warnings"]
+    assert (warning["event"], warning["replayed"]) == ("Gale Warning", True)
+    assert warning["recorded_at"] == GALE.sent.isoformat().replace("+00:00", "Z")
+    assert [o["purpose"] for o in settlement["outcomes"]] == ["deposit", "balance"]
+    deposit = settlement["outcomes"][0]
+    assert (deposit["kind"], deposit["amount_minor"], deposit["clauses"]) == (
+        "refund",
+        1666,
+        [GALE_CLAUSE],
+    )
+    assert settlement["explanation"] == (
+        "The operator cancelled day 2 for weather. Gale Warning (NWS) was in force."
+        " Your deposit: USD 16.66 refunded. Your balance: USD 100.00 released."
+    )
+    # only this guest: no other guest's name or amount, and no internal ids
+    assert "Ben" not in response.text
+    assert trip["id"] not in response.text
+    assert all(g["id"] not in response.text for g in (await _proposals(operator, trip["id"])))
+
+
+async def test_a_guest_sees_a_settlement_being_decided_without_amounts_and_not_once_rejected(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+) -> None:
+    trip = await _trip(operator, [WHOLE_TRIP_RULE], mandate_guest_minor=1000)
+    token = await _guest(operator, client, conn, paypal, trip["id"])
+    asked = await _cancel(operator, trip["id"], "rest", 1)
+
+    [settlement] = (await _settlement_view(client, token))["settlements"]
+
+    assert (settlement["state"], settlement["outcomes"]) == ("asked", [])
+    assert settlement["explanation"] == (
+        "The operator cancelled the whole trip for weather."
+        " The operator is deciding what this means for your payments."
+    )
+    decided = await operator.post(
+        f"/api/trips/{trip['id']}/proposals/{asked['id']}/decision", json={"reject": True}
+    )
+    assert decided.status_code == 200, decided.text
+    # rejecting withdraws the cancellation (step 8a)
+    assert (await _settlement_view(client, token))["settlements"] == []
+
+
+async def test_a_guest_sees_its_credit(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+) -> None:
+    credit = _rule(
+        scope="per_trip",
+        quote=WHOLE_TRIP_RULE["quote"],
+        remedies=[{"kind": "credit", "percent": 100, "deductions": [], "credit_expiry_months": 12}],
+    )
+    trip = await _trip(operator, [credit])
+    token = await _guest(operator, client, conn, paypal, trip["id"])
+    await _cancel(operator, trip["id"], "rest", 1)
+
+    view = await _settlement_view(client, token)
+
+    assert [(c["purpose"], c["amount_minor"]) for c in view["credits"]] == [("deposit", 5000)]
+    assert view["credits"][0]["expires_at"] is not None
+    assert "Your deposit: USD 50.00 as credit" in view["settlements"][0]["explanation"]
+    assert (await client.get("/api/guest/unknown-token/settlement")).status_code == 404

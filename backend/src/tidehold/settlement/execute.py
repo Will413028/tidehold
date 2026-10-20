@@ -15,6 +15,7 @@ from uuid import UUID
 from psycopg.rows import DictRow
 
 from tidehold.money import commands, service
+from tidehold.money.amounts import usd
 from tidehold.money.paypal import PayPalClient
 from tidehold.platform import due_actions as due
 from tidehold.platform.db import Conn
@@ -112,7 +113,7 @@ async def _late_deposit(conn: Conn, proposal: DictRow, guest: DictRow) -> None:
         proposals.NewAsk(
             "late_payment",
             f"payment:{guest['deposit_id']}",
-            f"{guest['name']} paid the deposit ({guest['deposit_minor'] / 100:.2f} USD) while the"
+            f"{guest['name']} paid the deposit ({usd(guest['deposit_minor'])}) while the"
             " trip was being cancelled, so no settlement covers it. Settle it with the guest"
             " outside tidehold, then dismiss this ask.",
             {"guest": guest["name"], "amount_minor": guest["deposit_minor"]},
@@ -170,7 +171,7 @@ async def _refused(conn: Conn, proposal: DictRow, guest: DictRow, move: dict[str
             "money_refused",
             f"command:{command['id']}",
             f"PayPal refused the {move['kind']} for {guest['name']}"
-            f" ({move['amount_minor'] / 100:.2f} USD). Settle it with the guest outside"
+            f" ({usd(move['amount_minor'])}). Settle it with the guest outside"
             " tidehold, then dismiss this ask.",
             {"guest": guest["name"], "kind": move["kind"], "amount_minor": move["amount_minor"]},
         ),

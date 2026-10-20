@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from tidehold.identity.sessions import current_workspace
 from tidehold.platform.db import Conn, connection
 from tidehold.platform.errors import Conflict, Invalid, Unavailable
-from tidehold.settlement import matching, watch
+from tidehold.settlement import guest, matching, watch
 from tidehold.settlement import proposals as store
 from tidehold.trips import store as trips
 from tidehold.warnings import openmeteo
@@ -20,6 +20,8 @@ from tidehold.warnings import store as warnings
 from tidehold.warnings.cap import Source
 
 router = APIRouter(prefix="/api")
+# guest access class: the unguessable token is the only credential
+guest_router = APIRouter(prefix="/api/guest/{token}")
 
 Workspace = Annotated[UUID, Depends(current_workspace)]
 Db = Annotated[Conn, Depends(connection)]
@@ -290,3 +292,70 @@ async def failed_actions(trip_id: UUID, workspace_id: Workspace, conn: Db) -> li
     await trips.trip(conn, workspace_id, trip_id)
     rows = await (await conn.execute(FAILED, {"trip": trip_id})).fetchall()
     return [FailedAction(**row) for row in rows]
+
+
+class GuestWarning(BaseModel):
+    source: str
+    event: str
+    area_desc: str
+    onset: datetime
+    expires: datetime
+    recorded_at: datetime
+    replayed: bool
+    url: str
+
+
+class GuestOutcome(BaseModel):
+    purpose: str
+    kind: str
+    amount_minor: int
+    credit_expiry_months: int | None
+    # the clauses behind the outcome, cut from the wording when the operator decided
+    clauses: list[str]
+
+
+class GuestSettlement(BaseModel):
+    """One cancellation as the guest sees it; `asked` means the operator is deciding."""
+
+    state: str
+    days: list[int]
+    whole_trip: bool
+    cause: str
+    recorded_at: datetime
+    warnings: list[GuestWarning]
+    outcomes: list[GuestOutcome]
+    explanation: str
+
+
+class GuestCredit(BaseModel):
+    purpose: str
+    amount_minor: int
+    expires_at: datetime | None
+
+
+class GuestSettlements(BaseModel):
+    """Only this guest's lines: no other guest's name or amount, and no internal ids."""
+
+    settlements: list[GuestSettlement]
+    credits: list[GuestCredit]
+
+
+@guest_router.get("/settlement")
+async def guest_settlement(token: str, conn: Db) -> GuestSettlements:
+    settlements, credits = await guest.view(conn, token)
+    return GuestSettlements(
+        settlements=[
+            GuestSettlement(
+                state=s.state,
+                days=s.days,
+                whole_trip=s.whole_trip,
+                cause=s.cause,
+                recorded_at=s.recorded_at,
+                warnings=[GuestWarning(**w) for w in s.warnings],
+                outcomes=[GuestOutcome(**vars(o)) for o in s.outcomes],
+                explanation=s.explanation,
+            )
+            for s in settlements
+        ],
+        credits=[GuestCredit(**c) for c in credits],
+    )
