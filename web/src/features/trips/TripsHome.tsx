@@ -7,7 +7,6 @@ import { formatDateRange } from "@/lib/dates";
 import { type Column, Grid } from "@/lib/grid";
 import { formatUsd } from "@/lib/money";
 import { OperatorNav } from "@/lib/nav";
-import { TripCard } from "./TripCard";
 import { TripForm } from "./TripForm";
 import type { Trip } from "./types";
 
@@ -19,11 +18,12 @@ const COLUMNS: Column<Trip>[] = [
   },
   { headerName: "Dates", valueGetter: ({ data }) => data && formatDateRange(data.starts_on, data.ends_on) },
   { headerName: "Guests", valueGetter: ({ data }) => data?.guests.length },
-  { headerName: "Deposit", valueGetter: ({ data }) => data && formatUsd(data.deposit_minor) },
-  { headerName: "Balance", valueGetter: ({ data }) => data && formatUsd(data.balance_minor) },
+  { headerName: "Deposit", valueGetter: ({ data }) => data && formatUsd(data.deposit_minor), wide: true },
+  { headerName: "Balance", valueGetter: ({ data }) => data && formatUsd(data.balance_minor), wide: true },
   {
     headerName: "Warnings",
     valueGetter: ({ data }) => data && `${data.warning_source} ${data.warning_areas.join(", ")}`,
+    wide: true,
   },
 ];
 
@@ -41,16 +41,11 @@ export function TripsHome() {
       .catch(() => setVersions([]));
   }, []);
 
-  const replace = (trip: Trip) => setTrips((all) => all.map((t) => (t.id === trip.id ? trip : t)));
-
   return (
     <main>
       <OperatorNav />
       <h1>Trips</h1>
       <Grid label="Trips" rows={trips} columns={COLUMNS} rowId={(t) => t.id} />
-      {trips.map((trip) => (
-        <TripCard key={trip.id} trip={trip} onChange={replace} />
-      ))}
       <h2>New trip</h2>
       <TripForm versions={versions} onCreated={(trip) => setTrips((all) => [...all, trip])} />
     </main>

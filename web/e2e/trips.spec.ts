@@ -48,5 +48,6 @@ test("an operator creates a trip bound to a published policy", async ({ page }) 
   const trips = page.getByRole("region", { name: "Trips" });
   await expect(trips.getByRole("link", { name: "Anilao weekend" })).toBeVisible();
   await expect(trips).toContainText("Dec 5, 2026 – Dec 6, 2026");
-  await expect(trips).toContainText("USD 300.00");
+  // the amounts are wide-only columns: a phone shows the name, dates and guests
+  if ((page.viewportSize()?.width ?? 0) > 720) await expect(trips).toContainText("USD 300.00");
 });

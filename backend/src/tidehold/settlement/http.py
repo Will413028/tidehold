@@ -157,14 +157,16 @@ class Evidence(BaseModel):
 
 
 def _warnings(rows: list[Any]) -> list[Warning]:
-    """One entry per warning, with every trip day it was found in force on."""
-    by_id: dict[Any, Warning] = {}
+    """One entry per warning and timeline (a live copy and its replay are both shown), with
+    every trip day it was found in force on."""
+    by_id: dict[tuple[Any, bool], Warning] = {}
     for row in rows:
-        seen = by_id.get(row["id"])
+        key = (row["id"], row["replayed"])
+        seen = by_id.get(key)
         if seen is None:
             summary = matching.summary(row)
             del summary["trip_day"]
-            by_id[row["id"]] = Warning(**summary, trip_days=[row["trip_day"]])
+            by_id[key] = Warning(**summary, trip_days=[row["trip_day"]])
         elif row["trip_day"] not in seen.trip_days:
             seen.trip_days.append(row["trip_day"])
     return list(by_id.values())
