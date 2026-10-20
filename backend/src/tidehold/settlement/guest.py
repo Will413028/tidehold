@@ -96,7 +96,8 @@ def _explanation(
     cancellation = facts["cancellation"]
     what = _what(days, whole_trip=cancellation["whole_trip"])
     parts = [f"The operator cancelled {what} {CAUSE[cancellation['cause']]}."]
-    names = [f"{w['event']} ({w['source'].upper()})" for w in warnings]
+    # a warning still in force live and its replay are one event to the guest
+    names = list(dict.fromkeys(f"{w['event']} ({w['source'].upper()})" for w in warnings))
     if names:
         parts.append(f"{', '.join(names)} {'was' if len(names) == 1 else 'were'} in force.")
     if outcomes is None:

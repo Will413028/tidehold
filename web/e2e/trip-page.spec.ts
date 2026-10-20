@@ -80,7 +80,7 @@ test("the operator replays a recorded gale, cancels the day and decides the sett
   await page.getByRole("button", { name: "Invite" }).click();
   const guests = page.getByRole("region", { name: "Guests" });
   await expect(guests).toContainText("Ana");
-  const link = await guests.getByRole("link", { name: "guest page" }).getAttribute("href");
+  const link = await guests.getByRole("link", { name: "open" }).getAttribute("href");
   await post(page.request, page, `/api${link?.replace("/g/", "/guest/")}/deposit/test-card`, {});
 
   await page.getByLabel("Recorded warning").selectOption(gale.id);

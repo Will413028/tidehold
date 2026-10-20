@@ -29,3 +29,14 @@ def test_a_guest_explanation_names_the_days_the_warnings_and_each_outcome() -> N
         " Gale Warning (NWS), Storm Warning (NWS) were in force."
         " Your deposit: USD 25.00 as credit. Your balance: no change."
     )
+
+
+def test_a_warning_seen_live_and_replayed_is_named_once() -> None:
+    facts = {"cancellation": {"whole_trip": False, "cause": "weather"}}
+    gale = {"event": "Gale Warning", "source": "nws"}
+
+    sentence = _explanation([1], facts, [gale, gale], None)
+
+    assert sentence.startswith(
+        "The operator cancelled day 1 for weather. Gale Warning (NWS) was in force."
+    )

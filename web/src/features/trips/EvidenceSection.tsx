@@ -30,7 +30,7 @@ function ReplayPicker({ trip, onReplayed }: { trip: Trip; onReplayed: (e: Eviden
   if (recorded.length === 0) return <p>No recorded {trip.warning_source} warning to replay.</p>;
   return (
     <form action={(form) => void replay(form)}>
-      <label>
+      <label className="wide">
         Recorded warning{" "}
         <select name="warning_id">
           {recorded.map((w) => (

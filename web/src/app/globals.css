@@ -31,3 +31,13 @@ label {
   display: inline-block;
   margin: 4px 12px 4px 0;
 }
+
+/* A label around a wide control (a long select) takes the line, and the control fits it. */
+label.wide {
+  display: block;
+  margin-right: 0;
+}
+
+label.wide select {
+  width: 100%;
+}

@@ -34,8 +34,10 @@ test("an operator writes a warning rule by hand and confirms its event set", asy
   await page.getByLabel("Source").selectOption("nws");
   await page.getByLabel("Warning quote (verbatim)").fill("a Gale Warning is in force");
   await page.getByRole("button", { name: "Propose the event set" }).click();
-  await page.getByLabel("Gale Warning", { exact: true }).check();
-  await expect(page.getByText("Event set: 1 values confirmed")).toBeVisible();
+  // the model proposes Gale Warning; the operator adds Storm Warning before publishing
+  await expect(page.getByLabel("Gale Warning", { exact: true })).toBeChecked();
+  await page.getByLabel("Storm Warning", { exact: true }).check();
+  await expect(page.getByText("Event set: 2 values confirmed")).toBeVisible();
   await page.getByRole("button", { name: "Publish this policy" }).click();
 
   await expect(page.getByRole("status")).toHaveText(/^Published/);

@@ -24,6 +24,23 @@ from tidehold.platform.migrate import migrate
 from tidehold.platform.settings import Settings
 from tidehold.warnings import store
 
+# The demo path's wording (web/e2e/demo-path.spec.ts): the fake model compiles it into one rule
+# that conditions on a Gale Warning and proposes that event set, as a live model would.
+GALE_CLAUSE = (
+    "If a Gale Warning is in force and we cancel a dive day, you get a full refund for that day."
+)
+GALE_WORDING = f"Weather cancellations. {GALE_CLAUSE}"
+GALE_RULE = {
+    **POLICY["rules"][0],
+    "warning": {
+        "named_as": "Gale Warning",
+        "source": "nws",
+        "event_values": ["Gale Warning"],
+        "quote": "a Gale Warning is in force",
+    },
+    "quote": GALE_CLAUSE,
+}
+
 # recorded official feeds committed with their licence lines (step 7): what a demo replays
 RECORDED = Path(__file__).parent.parent / "fixtures" / "warnings"
 
@@ -55,6 +72,8 @@ def main() -> None:
         asyncio.run(_ingest(url))
         model = FakeModel()
         model.answer(POLICY["wording"], POLICY["rules"], [])
+        model.answer(GALE_WORDING, [GALE_RULE], [])
+        model.event_values = ["Gale Warning"]
         settings = Settings(database_url=url, public_origin=ORIGIN, run_worker=True)
         app = create_app(
             settings,

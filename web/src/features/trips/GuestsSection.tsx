@@ -13,7 +13,8 @@ const COLUMNS: Column<Guest>[] = [
   { headerName: "Balance", valueGetter: ({ data }) => data?.balance_state ?? "not open" },
   {
     headerName: "Link",
-    cellRenderer: ({ data }: { data?: Guest }) => data && <a href={`/g/${data.token}`}>guest page</a>,
+    maxWidth: 80,
+    cellRenderer: ({ data }: { data?: Guest }) => data && <a href={`/g/${data.token}`}>open</a>,
   },
 ];
 
