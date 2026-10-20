@@ -61,7 +61,7 @@ class WarningCondition(Wire):
 class Rule(Wire):
     # The product heading the rule sits under ("Liveaboard Trips"), verbatim; null when the
     # wording covers one product. A trip binds the rules of its product (step 5).
-    product: str | None
+    product: Annotated[str, Field(min_length=1, max_length=200)] | None
     causes: list[Cause]
     warning: WarningCondition | None
     scope: Scope

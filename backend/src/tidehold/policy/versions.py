@@ -54,6 +54,8 @@ def _located(quote: str, wording: str) -> Span:
 
 def _check_rule(rule: Rule, wording: str) -> dict[str, Any]:
     span = _located(rule.quote, wording)
+    if rule.product is not None and locate(rule.product, wording) is None:
+        raise Invalid("PRODUCT_NOT_FOUND")
     warning_span = None
     if rule.warning is not None:
         warning_span = _located(rule.warning.quote, wording)

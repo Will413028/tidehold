@@ -209,6 +209,12 @@ async def test_a_version_with_several_products_needs_the_trips_product(
     unknown = await post_trip(operator, policy_version_id=version_id, policy_product="Courses")
     named = await post_trip(operator, policy_version_id=version_id, policy_product="Day trips:")
 
+    invented = await operator.post(
+        "/api/policy-versions",
+        json={"wording": WARNED, "rules": [{**liveaboard, "product": "Safaris:"}]},
+    )
+
+    assert invented.json() == {"detail": "PRODUCT_NOT_FOUND"}
     assert unnamed.json() == {"detail": "POLICY_PRODUCT_REQUIRED"}
     assert unknown.json() == {"detail": "POLICY_PRODUCT_UNKNOWN"}
     assert named.json()["policy_product"] == "Day trips:"

@@ -50,10 +50,10 @@ async def test_every_provider_call_caps_its_output_tokens(vendor: str) -> None:
 
 
 def test_the_configured_model_and_prompt_are_the_last_benchmarked() -> None:
-    text = BENCHMARK.read_text()
-    # The newest run is written first.
-    latest = re.search(r"Prompt hash `([0-9a-f]{16})`", text)
-    measured = set(re.findall(r"^\| `([a-z]+:[^`]+)` \|", text, re.MULTILINE))
+    # The newest run comes first; older runs follow under "## Earlier run" headings.
+    newest = BENCHMARK.read_text().split("\n## Earlier run")[0]
+    latest = re.search(r"Prompt hash `([0-9a-f]{16})`", newest)
+    measured = set(re.findall(r"^\| `([a-z]+:[^`]+)` \|", newest, re.MULTILINE))
 
     assert latest is not None
     assert latest.group(1) == PROMPT_HASH
