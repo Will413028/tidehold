@@ -47,11 +47,12 @@ class Settlement:
 
 
 def _warnings(facts: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """The warnings in force at the decision, once each."""
-    seen: dict[str, dict[str, Any]] = {}
+    """The warnings in force at the decision, once each per timeline: a warning still in force
+    live and its replay are both shown, each with its own label."""
+    seen: dict[tuple[str, bool], dict[str, Any]] = {}
     for clause in facts["clauses"]:
         for warning in clause["matched"]:
-            seen.setdefault(warning["identifier"], warning)
+            seen.setdefault((warning["identifier"], warning["replayed"]), warning)
     return list(seen.values())
 
 

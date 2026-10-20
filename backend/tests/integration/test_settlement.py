@@ -1100,3 +1100,18 @@ async def test_evidence_keeps_a_live_warning_and_its_replay_apart(
     warnings = (await _evidence(operator, trip["id"]))["warnings"]
 
     assert sorted(w["replayed"] for w in warnings) == [False, True]
+
+
+async def test_a_guest_sees_a_live_warning_and_its_replay_apart(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+) -> None:
+    trip = await _trip(operator, [GALE_RULE], starts_on=_today().isoformat())
+    token = await _guest(operator, client, conn, paypal, trip["id"])
+    fetched = _now() - timedelta(hours=2)
+    live = replace(GALE, sent=fetched, onset=fetched, expires=_now() + timedelta(days=3))
+    await _replayed(conn, trip["id"], live)
+    await _cancel(operator, trip["id"], "day", 1)
+
+    [settlement] = (await _settlement_view(client, token))["settlements"]
+
+    assert sorted(w["replayed"] for w in settlement["warnings"]) == [False, True]

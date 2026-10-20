@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { ApiError, api } from "@/lib/api";
+import { recordedLabel } from "@/lib/evidence";
 import type { Evidence, Recorded } from "./console-types";
-import { recordedLabel } from "./proposal-view";
 import type { Trip } from "./types";
 
 function ReplayPicker({ trip, onReplayed }: { trip: Trip; onReplayed: (e: Evidence) => void }) {

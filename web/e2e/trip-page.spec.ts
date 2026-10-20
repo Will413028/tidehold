@@ -2,7 +2,14 @@ import { type APIRequestContext, expect, type Page, test } from "@playwright/tes
 
 const CLAUSE = "If a Gale Warning is in force and we cancel a dive day, you get a full refund for that day.";
 
-type Recorded = { id: string; event: string; area_codes: string[] };
+type Recorded = {
+  id: string;
+  event: string;
+  area_codes: string[];
+  onset: string;
+  expires: string;
+  recorded_at: string;
+};
 
 async function post(request: APIRequestContext, page: Page, path: string, data: unknown) {
   const response = await request.post(path, { headers: { Origin: new URL(page.url()).origin }, data });
@@ -17,8 +24,15 @@ async function tripUnderAGale(page: Page): Promise<{ id: string; gale: Recorded 
   await page.goto("/");
   await post(request, page, "/api/workspaces", {});
   const recorded: Recorded[] = await (await request.get("/api/recorded-warnings?source=nws")).json();
-  const gale = recorded.find((w) => w.event === "Gale Warning");
-  if (!gale) throw new Error("the committed NWS sample has no Gale Warning");
+  // one already in force when recorded, so its replay (shifted to now, D12) covers today
+  const day = 24 * 3600 * 1000;
+  const gale = recorded.find(
+    (w) =>
+      w.event === "Gale Warning" &&
+      Date.parse(w.onset) <= Date.parse(w.recorded_at) &&
+      Date.parse(w.expires) - Date.parse(w.recorded_at) > day,
+  );
+  if (!gale) throw new Error("the committed NWS sample has no Gale Warning in force when recorded");
   const version = await post(request, page, "/api/policy-versions", {
     wording: `Weather. ${CLAUSE}`,
     rules: [
@@ -97,4 +111,15 @@ test("the operator replays a recorded gale, cancels the day and decides the sett
   await expect(asks.getByRole("row").filter({ hasText: "Gale Warning in force on day 1" })).toContainText(
     "answered",
   );
+
+  // the guest's own page (R12): the cancellation, the warning with its recorded label, the clause
+  await page.goto(link ?? "");
+  const cancellations = page.getByRole("region", { name: "Cancellations" });
+  await expect(cancellations).toContainText("The operator cancelled day 1 for weather.");
+  await expect(cancellations).toContainText("Your deposit: USD 25.00 refunded.");
+  await expect(cancellations.getByRole("list", { name: "Official warnings in force" })).toContainText(
+    /Gale Warning \(NWS\).*recorded at .* UTC, replayed/,
+  );
+  const deposit = cancellations.getByRole("figure").filter({ hasText: "your deposit" });
+  await expect(deposit.locator("blockquote")).toHaveText(CLAUSE);
 });

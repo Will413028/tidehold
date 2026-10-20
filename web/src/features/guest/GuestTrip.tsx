@@ -1,8 +1,9 @@
 import { formatDateRange } from "@/lib/dates";
 import { formatUsd } from "@/lib/money";
 import { GuestPayments } from "./GuestPayments";
+import { GuestSettlements } from "./GuestSettlements";
 import { nextPayment } from "./next-payment";
-import type { GuestView, PaymentView } from "./types";
+import type { GuestView, PaymentView, SettlementView } from "./types";
 
 const STATE: Record<PaymentView["state"], string> = {
   pending: "not paid yet",
@@ -19,7 +20,15 @@ function balanceLine(view: GuestView): string {
   return `${formatUsd(balance.amount_minor)}: ${STATE[balance.payment.state]}`;
 }
 
-export function GuestTrip({ token, view }: { token: string; view: GuestView }) {
+export function GuestTrip({
+  token,
+  view,
+  settlement,
+}: {
+  token: string;
+  view: GuestView;
+  settlement: SettlementView;
+}) {
   const purpose = nextPayment(view);
   return (
     <main>
@@ -34,6 +43,7 @@ export function GuestTrip({ token, view }: { token: string; view: GuestView }) {
         </li>
         <li>Balance: {balanceLine(view)}</li>
       </ul>
+      <GuestSettlements view={settlement} />
       {purpose && <GuestPayments token={token} purpose={purpose} />}
     </main>
   );

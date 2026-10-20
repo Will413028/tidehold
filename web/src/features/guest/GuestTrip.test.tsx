@@ -17,7 +17,9 @@ const VIEW: GuestView = {
 };
 
 it("shows the trip and both payments", () => {
-  const html = renderToStaticMarkup(<GuestTrip token="t" view={VIEW} />);
+  const html = renderToStaticMarkup(
+    <GuestTrip token="t" view={VIEW} settlement={{ settlements: [], credits: [] }} />,
+  );
 
   expect(html).toContain("Anilao weekend");
   expect(html).toContain("Dec 5, 2026 – Dec 7, 2026 · 3 days");

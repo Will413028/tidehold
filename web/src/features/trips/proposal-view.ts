@@ -46,12 +46,3 @@ export function decisionBody(p: Proposal, choice: Record<string, number>, decisi
   }
   return decision === "reject" ? { reject: true } : { dismiss: true };
 }
-
-const minute = (iso: string) => `${iso.slice(0, 16).replace("T", " ")} UTC`;
-
-/** Replayed evidence always says when it was recorded (D12). */
-export function recordedLabel(w: { replayed: boolean; recorded_at: string }): string {
-  return w.replayed
-    ? `recorded at ${minute(w.recorded_at)}, replayed`
-    : `fetched at ${minute(w.recorded_at)}`;
-}
