@@ -826,3 +826,69 @@ async def test_a_withdrawn_cancellation_reopens_its_warning_asks_and_the_check(
     assert answered == {"answered"}
     assert reopened == {"asked"}
     assert {f"day:{d}:Seiche Warning" for d in (1, 2, 3)} <= subjects
+
+
+# --- what the console reads (plan step 9) --------------------------------------------------
+
+
+async def _evidence(operator: AsyncClient, trip_id: str) -> dict[str, Any]:
+    response = await operator.get(f"/api/trips/{trip_id}/evidence")
+    assert response.status_code == 200, response.text
+    evidence: dict[str, Any] = response.json()
+    return evidence
+
+
+async def test_evidence_shows_a_replayed_warning_once_visible_with_its_label(
+    operator: AsyncClient, conn: Conn
+) -> None:
+    trip = await _trip(operator, [GALE_RULE], starts_on=_today().isoformat(), days=2)
+    assert (await _evidence(operator, trip["id"]))["warnings"] == []
+
+    await _replayed(conn, trip["id"], lands=_now() + timedelta(hours=1))
+    assert (await _evidence(operator, trip["id"]))["warnings"] == []
+
+    await _replayed(conn, trip["id"])
+    [warning] = (await _evidence(operator, trip["id"]))["warnings"]
+    assert warning["event"] == "Gale Warning"
+    assert warning["replayed"] is True
+    assert warning["recorded_at"] == GALE.sent.isoformat().replace("+00:00", "Z")
+    assert warning["trip_days"] == [1, 2]
+
+
+async def test_evidence_corroborates_with_a_forecast_per_local_day_fetched_once_an_hour(
+    operator: AsyncClient, forecast: Any
+) -> None:
+    trip = await _trip(operator, [GALE_RULE], starts_on=_today().isoformat(), days=2)
+
+    first = (await _evidence(operator, trip["id"]))["forecast"]
+    again = (await _evidence(operator, trip["id"]))["forecast"]
+
+    assert len(forecast.requests) == 1
+    assert forecast.requests[0].url.params["timezone"] == ZONE
+    assert first == again
+    assert first["status"] == "ok"
+    assert [d["day"] for d in first["days"]] == [
+        _today().isoformat(),
+        (_today() + timedelta(days=1)).isoformat(),
+    ]
+    assert first["days"][0]["max_wave_height_m"] == "1.50"
+    assert "not for coastal navigation" in first["attribution"]
+
+
+async def test_evidence_without_a_forecast_still_shows_the_warnings(
+    operator: AsyncClient, conn: Conn, forecast: Any
+) -> None:
+    forecast.fail = True
+    trip = await _trip(operator, [GALE_RULE], starts_on=_today().isoformat())
+    await _replayed(conn, trip["id"])
+
+    evidence = await _evidence(operator, trip["id"])
+
+    assert evidence["forecast"] == {
+        "status": "unavailable",
+        "days": [],
+        "fetched_at": None,
+        "url": None,
+        "attribution": evidence["forecast"]["attribution"],
+    }
+    assert len(evidence["warnings"]) == 1

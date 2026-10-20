@@ -1,16 +1,21 @@
 """Operator routes for cancellations and proposals (workspace access class, plan step 8a)."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from psycopg.rows import DictRow
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from tidehold.identity.sessions import current_workspace
 from tidehold.platform.db import Conn, connection
+from tidehold.platform.errors import Unavailable
+from tidehold.settlement import matching
 from tidehold.settlement import proposals as store
+from tidehold.trips import store as trips
+from tidehold.warnings import openmeteo
 
 router = APIRouter(prefix="/api")
 
@@ -107,3 +112,89 @@ async def decide(
     )
     await store.decide_proposal(conn, ref, decision, datetime.now(UTC))
     return _view(await store.proposal(conn, ref))
+
+
+class Warning(BaseModel):
+    """A warning in force on the trip's days, as visible now: `replayed` ones were recorded at
+    `recorded_at` and replayed (D12)."""
+
+    source: str
+    identifier: str
+    event: str
+    value: str
+    area_desc: str
+    onset: datetime
+    expires: datetime
+    recorded_at: datetime
+    visible_at: datetime
+    replayed: bool
+    url: str
+    trip_days: list[int]
+
+
+class ForecastDay(BaseModel):
+    day: date
+    max_wave_height_m: Decimal | None
+
+
+class Forecast(BaseModel):
+    """Corroboration only: a forecast never settles or conditions anything (D16)."""
+
+    status: Literal["ok", "unavailable"]
+    attribution: str
+    fetched_at: datetime | None
+    url: str | None
+    days: list[ForecastDay]
+
+
+class Evidence(BaseModel):
+    warnings: list[Warning]
+    forecast: Forecast
+
+
+def _warnings(rows: list[Any]) -> list[Warning]:
+    """One entry per warning, with every trip day it was found in force on."""
+    by_id: dict[Any, Warning] = {}
+    for row in rows:
+        seen = by_id.get(row["id"])
+        if seen is None:
+            summary = matching.summary(row)
+            del summary["trip_day"]
+            by_id[row["id"]] = Warning(**summary, trip_days=[row["trip_day"]])
+        elif row["trip_day"] not in seen.trip_days:
+            seen.trip_days.append(row["trip_day"])
+    return list(by_id.values())
+
+
+async def _forecast(request: Request, conn: Conn, trip: Any, now: datetime) -> Forecast:
+    site = openmeteo.Site(trip["site_lat"], trip["site_lon"], trip["timezone"])
+    days = (trip["starts_on"], trips.ends_on(trip["starts_on"], trip["days"]))
+    try:
+        rows = await openmeteo.forecast(conn, request.app.state.forecasts, site, days, now)
+    except Unavailable:
+        return Forecast(
+            status="unavailable",
+            attribution=openmeteo.ATTRIBUTION,
+            fetched_at=None,
+            url=None,
+            days=[],
+        )
+    return Forecast(
+        status="ok",
+        attribution=openmeteo.ATTRIBUTION,
+        fetched_at=rows[0].fetched_at if rows else None,
+        url=rows[0].url if rows else None,
+        days=[ForecastDay(day=r.day, max_wave_height_m=r.max_wave_height_m) for r in rows],
+    )
+
+
+@router.get("/trips/{trip_id}/evidence")
+async def trip_evidence(
+    trip_id: UUID, request: Request, workspace_id: Workspace, conn: Db
+) -> Evidence:
+    """What the operator decides a cancellation from: the warnings visible now in force on any
+    local trip day, and the site's marine forecast."""
+    now = datetime.now(UTC)
+    trip = await trips.trip(conn, workspace_id, trip_id)
+    rows = await matching.in_force(conn, trip, range(1, trip["days"] + 1), now)
+    return Evidence(warnings=_warnings(rows), forecast=await _forecast(request, conn, trip, now))

@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx2 as httpx
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -52,8 +53,11 @@ def create_app(
     *,
     paypal: PayPalClient | None = None,
     compiler: Provider | None = None,
+    forecasts: httpx.AsyncClient | None = None,
 ) -> FastAPI:
     settings = settings or from_env()
+    # Open-Meteo, read for corroboration on the evidence page (plan step 9)
+    forecasts = forecasts or httpx.AsyncClient()
     if paypal is None and settings.paypal is not None:
         paypal = PayPalClient(settings.paypal.client_id, settings.paypal.client_secret)
     built = providers.build(settings.compile_model, settings.model_keys)
@@ -74,6 +78,7 @@ def create_app(
             task.cancel()
         if paypal is not None:
             await paypal.aclose()
+        await forecasts.aclose()
         if built is not None:
             await built.client.aclose()
 
@@ -85,6 +90,7 @@ def create_app(
     app.state.paypal = paypal
     app.state.paypal_client_id = settings.paypal.client_id if settings.paypal else None
     app.state.compiler = compiler
+    app.state.forecasts = forecasts
     app.add_exception_handler(DomainError, domain_error)
     app.add_exception_handler(RequestValidationError, invalid_request)
     routes.mount(app)

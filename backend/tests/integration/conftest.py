@@ -1,7 +1,9 @@
 """Integration tests run against a throwaway PostgreSQL 18 container, migrated once per session."""
 
 from collections.abc import AsyncIterator, Iterator
+from datetime import date, timedelta
 
+import httpx2
 import psycopg
 import pytest
 from fastapi import FastAPI
@@ -42,6 +44,32 @@ def paypal() -> FakePayPal:
     return FakePayPal()
 
 
+class FakeForecast:
+    """Open-Meteo's marine API: every requested day gets a wave height, unless `fail`."""
+
+    def __init__(self) -> None:
+        self.requests: list[httpx2.Request] = []
+        self.fail = False
+
+    def client(self) -> httpx2.AsyncClient:
+        return httpx2.AsyncClient(transport=httpx2.MockTransport(self.handle))
+
+    def handle(self, request: httpx2.Request) -> httpx2.Response:
+        self.requests.append(request)
+        if self.fail:
+            return httpx2.Response(502)
+        start = date.fromisoformat(request.url.params["start_date"])
+        end = date.fromisoformat(request.url.params["end_date"])
+        days = [start + timedelta(days=n) for n in range((end - start).days + 1)]
+        daily = {"time": [d.isoformat() for d in days], "wave_height_max": [1.5] * len(days)}
+        return httpx2.Response(200, json={"daily": daily})
+
+
+@pytest.fixture
+def forecast() -> FakeForecast:
+    return FakeForecast()
+
+
 @pytest.fixture
 def model() -> FakeModel:
     """The compiler's model; it compiles `POLICY`'s wording into `POLICY`'s rules."""
@@ -58,12 +86,16 @@ def daily_cap() -> int:
 
 @pytest.fixture
 def app(
-    database_url: str, paypal: FakePayPal, model: FakeModel, daily_cap: int
+    database_url: str,
+    paypal: FakePayPal,
+    model: FakeModel,
+    forecast: FakeForecast,
+    daily_cap: int,
 ) -> Iterator[FastAPI]:
     settings = Settings(
         database_url=database_url, public_origin=ORIGIN, model_daily_live_cap=daily_cap
     )
-    yield create_app(settings, paypal=paypal.client(), compiler=model)
+    yield create_app(settings, paypal=paypal.client(), compiler=model, forecasts=forecast.client())
     _truncate(database_url)
 
 

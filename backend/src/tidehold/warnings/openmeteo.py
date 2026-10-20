@@ -6,7 +6,7 @@ suitable for coastal navigation"; its data is attributed to DWD and Open-Meteo w
 """
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import httpx2 as httpx
@@ -22,20 +22,29 @@ ATTRIBUTION = "Marine forecast: Open-Meteo, from DWD ICON Wave; not for coastal 
 class Corroboration:
     site_lat: float
     site_lon: float
+    timezone: str
     day: date
     max_wave_height_m: Decimal | None
     url: str
     fetched_at: datetime
 
 
+@dataclass(frozen=True)
+class Site:
+    lat: float
+    lon: float
+    # an IANA name: the daily maximum is per local day of the trip
+    timezone: str
+
+
 async def fetch(
-    client: httpx.AsyncClient, *, lat: float, lon: float, days: tuple[date, date], now: datetime
+    client: httpx.AsyncClient, site: Site, days: tuple[date, date], now: datetime
 ) -> list[Corroboration]:
     params = {
-        "latitude": f"{lat:.5f}",
-        "longitude": f"{lon:.5f}",
+        "latitude": f"{site.lat:.5f}",
+        "longitude": f"{site.lon:.5f}",
         "daily": "wave_height_max",
-        "timezone": "UTC",
+        "timezone": site.timezone,
         "start_date": days[0].isoformat(),
         "end_date": days[1].isoformat(),
     }
@@ -48,8 +57,9 @@ async def fetch(
         raise Unavailable("OPEN_METEO_UNAVAILABLE") from error
     return [
         Corroboration(
-            site_lat=lat,
-            site_lon=lon,
+            site_lat=site.lat,
+            site_lon=site.lon,
+            timezone=site.timezone,
             day=date.fromisoformat(day),
             max_wave_height_m=None if height is None else Decimal(str(height)),
             url=str(response.url),
@@ -62,7 +72,53 @@ async def fetch(
 async def store(conn: Conn, corroborations: list[Corroboration]) -> None:
     for c in corroborations:
         await conn.execute(
-            "insert into corroborations (site_lat, site_lon, day, max_wave_height_m, url,"
-            " fetched_at) values (%s, %s, %s, %s, %s, %s)",
-            (c.site_lat, c.site_lon, c.day, c.max_wave_height_m, c.url, c.fetched_at),
+            "insert into corroborations (site_lat, site_lon, timezone, day, max_wave_height_m,"
+            " url, fetched_at) values (%s, %s, %s, %s, %s, %s, %s)",
+            (c.site_lat, c.site_lon, c.timezone, c.day, c.max_wave_height_m, c.url, c.fetched_at),
         )
+
+
+# A page reload reuses a fetch this recent instead of calling the API again.
+REUSE = timedelta(hours=1)
+
+
+async def _recent(conn: Conn, site: Site, now: datetime) -> list[Corroboration]:
+    """The site's newest fetch made within `REUSE` of `now`, all of its days."""
+    rows = await (
+        await conn.execute(
+            "select * from corroborations where (site_lat, site_lon, timezone, fetched_at) in"
+            " (select site_lat, site_lon, timezone, max(fetched_at) from corroborations"
+            "  where site_lat = round(%(lat)s::numeric, 5)"
+            "  and site_lon = round(%(lon)s::numeric, 5)"
+            "  and timezone = %(tz)s and fetched_at > %(since)s"
+            "  group by site_lat, site_lon, timezone)"
+            " order by day",
+            {"lat": site.lat, "lon": site.lon, "tz": site.timezone, "since": now - REUSE},
+        )
+    ).fetchall()
+    return [
+        Corroboration(
+            site_lat=float(r["site_lat"]),
+            site_lon=float(r["site_lon"]),
+            timezone=r["timezone"],
+            day=r["day"],
+            max_wave_height_m=r["max_wave_height_m"],
+            url=r["url"],
+            fetched_at=r["fetched_at"],
+        )
+        for r in rows
+    ]
+
+
+async def forecast(
+    conn: Conn, client: httpx.AsyncClient, site: Site, days: tuple[date, date], now: datetime
+) -> list[Corroboration]:
+    """The forecast for `days` at `site`: reused within the hour, else fetched and stored.
+    Raises `Unavailable` when the API fails."""
+    recent = [c for c in await _recent(conn, site, now) if days[0] <= c.day <= days[1]]
+    if len({c.day for c in recent}) == (days[1] - days[0]).days + 1:
+        return recent
+    fetched = await fetch(client, site, days, now)
+    await store(conn, fetched)
+    # read back, so a fresh fetch and a reused one look the same (numeric(5, 2))
+    return [c for c in await _recent(conn, site, now) if days[0] <= c.day <= days[1]]
