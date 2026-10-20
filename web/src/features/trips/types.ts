@@ -12,10 +12,17 @@ export type Trip = {
   starts_on: string;
   ends_on: string;
   days: number;
+  site_lat: number;
+  site_lon: number;
   warning_source: string;
   warning_areas: string[];
   deposit_minor: number;
   balance_minor: number;
   balance_requested_at: string | null;
+  policy_version_id: string;
+  policy_product: string | null;
+  timezone: string;
+  mandate_guest_minor: number;
+  mandate_trip_minor: number;
   guests: GuestRow[];
 };

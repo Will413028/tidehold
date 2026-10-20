@@ -23,7 +23,6 @@ export function GuestTrip({ token, view }: { token: string; view: GuestView }) {
   const purpose = nextPayment(view);
   return (
     <main>
-      <p role="note">Sandbox demo: do not enter real personal data. No real money moves.</p>
       <h1>{view.trip_name}</h1>
       <p>
         {view.guest_name} · {formatDateRange(view.starts_on, view.ends_on)} · {view.days}{" "}

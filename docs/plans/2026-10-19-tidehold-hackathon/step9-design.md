@@ -44,7 +44,7 @@ Routes (`app` imports a feature only through its `index.ts`):
 - `lib/grid.tsx` registers AG Grid's community modules once and wraps `AgGridReact` with the shared column defaults; a dependency-cruiser rule keeps features from importing AG Grid directly. D10 names trips, guests and proposals tables; the timeline and failed actions are plain lists.
 - The decision panel shows, per purpose, each option's label and per-guest lines (amounts from `parts`, formatted by `lib/money`), the stored question, and the draft beside it labelled "drafted by the model"; accept sends the chosen index per purpose; reject explains that it withdraws the cancellation. Facts and question are shown before the draft (threat model surface 4).
 - Hand-written rules use one form per rule over the `Rule` schema (causes, scope, applies-to, remedies, chooser, quote); the quote must be pasted from the wording, and the API's span check is the only judge.
-- Responsive: one column under 720 px; grids switch to `domLayout="autoHeight"` with fewer columns on narrow screens.
+- Responsive: one column under 720 px; grids always use `domLayout="autoHeight"` (a few rows each, so the page scrolls, not the grid), with fewer columns on narrow screens.
 
 ## Tests
 

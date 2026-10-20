@@ -16,14 +16,13 @@ const VIEW: GuestView = {
   balance: { opens_at: "2026-11-09T00:00:00Z", amount_minor: 30000, payment: null },
 };
 
-it("shows the trip, both payments and the sandbox notice", () => {
+it("shows the trip and both payments", () => {
   const html = renderToStaticMarkup(<GuestTrip token="t" view={VIEW} />);
 
   expect(html).toContain("Anilao weekend");
   expect(html).toContain("Dec 5, 2026 – Dec 7, 2026 · 3 days");
   expect(html).toContain("Deposit: USD 50.00: not paid yet");
   expect(html).toContain("held from 2026-11-09");
-  expect(html).toContain("do not enter real personal data");
   expect(html).toContain("pay-deposit");
 });
 

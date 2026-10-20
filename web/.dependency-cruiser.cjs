@@ -29,6 +29,13 @@ module.exports = {
       to: { path: "^src/features/[^/]+/(?!index\\.ts$)" },
     },
     {
+      name: "grid-through-lib",
+      comment: "AG Grid is imported only by src/lib/grid.tsx (D10); features pass rows and columns.",
+      severity: "error",
+      from: { path: "^src/", pathNot: "^src/lib/grid\\.tsx$" },
+      to: { path: "node_modules/ag-grid-" },
+    },
+    {
       name: "not-to-unresolvable",
       severity: "error",
       from: {},

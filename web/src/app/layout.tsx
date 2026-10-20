@@ -9,7 +9,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <p role="note">Sandbox demo: do not enter real personal data. No real money moves.</p>
+        {children}
+      </body>
     </html>
   );
 }
