@@ -8,7 +8,7 @@ each reason: docs/plans/2026-10-19-tidehold-hackathon/step8a-design.md.
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from math import floor
 from typing import Any, Literal, get_args
@@ -97,6 +97,8 @@ class _Option:
     label: str
     remedy: Remedy
     per_day: bool
+    # indexes into the evaluated rules (the proposal's `facts.clauses`) that gave it
+    rules: tuple[int, ...] = field(default=(), compare=False)
 
 
 def _covers_cause(rule: Rule, cause: str) -> bool:
@@ -107,16 +109,21 @@ def _applies(rule: Rule, purpose: Purpose) -> bool:
     return rule.applies_to in (purpose, "both")
 
 
-def _candidates(rules: Sequence[RuleIn], cancelled: Cancelled, purpose: Purpose) -> list[RuleIn]:
+def _candidates(
+    rules: Sequence[RuleIn], cancelled: Cancelled, purpose: Purpose
+) -> list[tuple[int, RuleIn]]:
     """A day fits per-day rules; the whole trip fits per-trip rules, else the per-day ones
-    for every covered day; the rest of a trip that has begun fits per-day rules only."""
+    for every covered day; the rest of a trip that has begun fits per-day rules only. Each
+    candidate keeps its index in `rules`."""
     eligible = [
-        r for r in rules if _covers_cause(r.rule, cancelled.cause) and _applies(r.rule, purpose)
+        (i, r)
+        for i, r in enumerate(rules)
+        if _covers_cause(r.rule, cancelled.cause) and _applies(r.rule, purpose)
     ]
-    per_trip = [r for r in eligible if r.rule.scope == "per_trip"]
+    per_trip = [(i, r) for i, r in eligible if r.rule.scope == "per_trip"]
     if cancelled.whole_trip and per_trip:
         return per_trip
-    return [r for r in eligible if r.rule.scope == "per_day"]
+    return [(i, r) for i, r in eligible if r.rule.scope == "per_day"]
 
 
 def _label(remedy: Remedy) -> str:
@@ -149,11 +156,15 @@ def _amount(option: _Option, cancelled: Cancelled, guest: GuestMoney, purpose: P
 
 
 def _part(
-    options: Sequence[_Option], cancelled: Cancelled, guests: Sequence[GuestMoney], purpose: Purpose
+    options: Sequence[_Option],
+    cancelled: Cancelled,
+    guests: Sequence[GuestMoney],
+    purpose: Purpose,
 ) -> list[dict[str, Any]]:
     return [
         {
             "label": option.label,
+            "rules": list(option.rules),
             "lines": [
                 {
                     "guest_id": guest.guest_id,
@@ -183,21 +194,25 @@ def _flags(candidate: RuleIn) -> set[Reason]:
 
 
 def _options(
-    candidates: Sequence[RuleIn], cancelled: Cancelled
+    candidates: Sequence[tuple[int, RuleIn]], cancelled: Cancelled
 ) -> tuple[list[_Option], set[Reason]]:
     if not candidates:
         per_day = not cancelled.whole_trip
         return [_Option(_label(r), r, per_day) for r in STANDARD], {"NO_RULE"}
-    reasons = set().union(*(_flags(c) for c in candidates))
+    reasons = set().union(*(_flags(c) for _, c in candidates))
     options: list[_Option] = []
-    for candidate in candidates:
+    for index, candidate in candidates:
         for remedy in candidate.rule.remedies:
-            option = _Option(_label(remedy), remedy, candidate.rule.scope == "per_day")
+            option = _Option(_label(remedy), remedy, candidate.rule.scope == "per_day", (index,))
             if option not in options:
                 options.append(option)
+            else:  # the same remedy from another rule: one option, both sources
+                at = options.index(option)
+                if index not in options[at].rules:
+                    options[at] = replace(options[at], rules=(*options[at].rules, index))
     if "WARNING_NOT_MATCHED" in reasons and all(o.remedy.kind != "none" for o in options):
         options.append(_Option(_label(NO_REMEDY), NO_REMEDY, per_day=True))
-    if len({c.rule.model_dump_json(include={"remedies"}) for c in candidates}) > 1:
+    if len({c.rule.model_dump_json(include={"remedies"}) for _, c in candidates}) > 1:
         reasons.add("CONFLICTING_RULES")
     if any(d.kind == "fixed" for o in options for d in o.remedy.deductions):
         reasons.add("FIXED_DEDUCTION")

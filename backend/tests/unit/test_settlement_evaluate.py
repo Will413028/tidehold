@@ -217,3 +217,22 @@ def test_a_ruling_that_quotes_another_clause_or_none_marks_nothing(
     ruling_spans: list[tuple[int, int] | None],
 ) -> None:
     assert not ruled_in_text((10, 20), None, ruling_spans)
+
+
+def test_each_option_names_every_rule_it_came_from() -> None:
+    """The guest page shows the clause behind an outcome (R12); a remedy two rules share is
+    one option, and the standard options of an unruled cause come from no rule."""
+    weather = _rule(quote="weather")
+    shared = _rule(causes=["any"], quote="any cause")
+    credit = _rule(remedies=[_remedy("credit", 100)], applies_to="deposit", quote="credit")
+
+    evaluation = evaluate([RuleIn(weather), RuleIn(shared), RuleIn(credit)], DAY_2, [ANA])
+
+    assert [(o["label"], o["rules"]) for o in evaluation.parts["deposit"]] == [
+        ("refund 100%", [0, 1]),
+        ("credit 100%", [2]),
+    ]
+    assert [o["rules"] for o in evaluation.parts["balance"]] == [[0, 1]]
+    safety = Cancelled(scope="day", cause="safety", first_day=2, covered_days=1, trip_days=3)
+    unruled = evaluate([RuleIn(weather)], safety, [ANA])
+    assert all(o["rules"] == [] for o in unruled.parts["deposit"])
