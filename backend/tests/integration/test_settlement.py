@@ -957,3 +957,46 @@ async def test_recorded_warnings_are_listed_by_source_and_area_newest_first(
     assert [w["identifier"] for w in every.json()] == ["gale-2", GALE.identifier]
     assert [w["identifier"] for w in one_area.json()] == [GALE.identifier]
     assert every.json()[0]["recorded_at"] == newer.sent.isoformat().replace("+00:00", "Z")
+
+
+SUBJECT_OF = {"check_trip": 0, "reconcile_payment": 1, "settle_proposal": 2}
+
+
+async def _failed(conn: Conn, kind: str, subject: Any, error: str, at: datetime) -> None:
+    """A due action that gave up after its retries."""
+    subjects: list[Any] = [None, None, None]
+    subjects[SUBJECT_OF[kind]] = subject
+    await conn.execute(
+        "insert into due_actions (kind, trip_id, payment_id, proposal_id, due_at, state,"
+        " attempts, last_error, finished_at) values (%s, %s, %s, %s, %s, 'failed', 8, %s, %s)",
+        (kind, *subjects, at, error, at),
+    )
+
+
+async def test_failed_actions_of_a_trip_are_grouped_per_kind_and_subject(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+) -> None:
+    trip = await _trip(operator, [WHOLE_TRIP_RULE])
+    other = await _trip(operator, [WHOLE_TRIP_RULE])
+    token = await _guest(operator, client, conn, paypal, trip["id"])
+    guest = await (
+        await conn.execute("select deposit_payment_id from guests where token = %s", (token,))
+    ).fetchone()
+    assert guest is not None
+    proposal = await _cancel(operator, trip["id"], "day", 1)
+    then = _now() - timedelta(hours=2)
+    await _failed(conn, "check_trip", trip["id"], "ValueError", then)
+    await _failed(conn, "check_trip", trip["id"], "KeyError", then + timedelta(hours=1))
+    await _failed(conn, "check_trip", other["id"], "ValueError", then)
+    unknown = "PAYPAL_OUTCOME_STILL_UNKNOWN"
+    await _failed(conn, "reconcile_payment", guest["deposit_payment_id"], unknown, then)
+    await _failed(conn, "settle_proposal", proposal["id"], "RuntimeError", then)
+
+    response = await operator.get(f"/api/trips/{trip['id']}/failed-actions")
+
+    assert response.status_code == 200, response.text
+    assert sorted((a["kind"], a["failures"], a["last_error"]) for a in response.json()) == [
+        ("check_trip", 2, "KeyError"),
+        ("reconcile_payment", 1, "PAYPAL_OUTCOME_STILL_UNKNOWN"),
+        ("settle_proposal", 1, "RuntimeError"),
+    ]

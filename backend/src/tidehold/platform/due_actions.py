@@ -121,7 +121,9 @@ async def complete(conn: Conn, action: Action, now: datetime) -> bool:
 
 async def retry(conn: Conn, action: Action, now: datetime, error: str) -> bool:
     """Back off, or give up after MAX_ATTEMPTS; a failed action stays for the operator console
-    (plan step 9) and is not recreated by schedules derived from trip state."""
+    (plan step 9). Whether a schedule derived from trip state recreates it is that kind's own
+    rule: `request_balance` never does, `check_trip` does, and `settle_proposal` does in the
+    whole-trip late-payment sweep."""
     failed = action.attempts >= MAX_ATTEMPTS
     row = await (
         await conn.execute(

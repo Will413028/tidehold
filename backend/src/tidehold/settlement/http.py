@@ -253,3 +253,40 @@ async def replay_warning(
         await warnings.replay(conn, workspace_id, body.warning_id, now)
         await watch.check(conn, trip_id, now)
     return await _evidence(request, conn, await trips.trip(conn, workspace_id, trip_id), now)
+
+
+class FailedAction(BaseModel):
+    """Work that gave up after its retries, one row per kind and subject."""
+
+    kind: str
+    subject: UUID
+    failures: int
+    last_error: str | None  # an exception class name or a RetryLater code, never a message
+    finished_at: datetime
+
+
+# Trip actions name the trip; payment actions a guest's current deposit or balance; proposal
+# actions one of the trip's proposals.
+FAILED = """
+select kind, coalesce(trip_id, payment_id, proposal_id) as subject, count(*) as failures,
+       (array_agg(last_error order by finished_at desc))[1] as last_error,
+       max(finished_at) as finished_at
+from due_actions
+where state = 'failed' and (
+    trip_id = %(trip)s
+    or payment_id in (
+        select unnest(array[deposit_payment_id, balance_payment_id])
+        from guests where trip_id = %(trip)s)
+    or proposal_id in (select id from proposals where trip_id = %(trip)s))
+group by kind, subject
+order by finished_at desc
+"""
+
+
+@router.get("/trips/{trip_id}/failed-actions")
+async def failed_actions(trip_id: UUID, workspace_id: Workspace, conn: Db) -> list[FailedAction]:
+    """Failed work stays for the operator: `request_balance` is never recreated after a
+    failure, and the recreated kinds would otherwise add a row per failure."""
+    await trips.trip(conn, workspace_id, trip_id)
+    rows = await (await conn.execute(FAILED, {"trip": trip_id})).fetchall()
+    return [FailedAction(**row) for row in rows]
