@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
-import { GuestSettlements } from "./GuestSettlements";
+import { GuestSettlements, outcomeText } from "./GuestSettlements";
 import type { SettlementView } from "./types";
 
 const VIEW: SettlementView = {
@@ -32,7 +32,7 @@ const VIEW: SettlementView = {
           clauses: ["If a Gale Warning is in force and we cancel a dive day, you get a full refund."],
         },
       ],
-      explanation: "The operator cancelled day 1 for weather. Your deposit: USD 25.00 refunded.",
+      explanation: "The operator cancelled day 1 for weather. Gale Warning (NWS) was in force.",
     },
   ],
   credits: [{ purpose: "deposit", amount_minor: 5000, expires_at: "2027-10-20T00:00:00Z" }],
@@ -41,7 +41,9 @@ const VIEW: SettlementView = {
 it("shows the operator's cancellation, the warning with its recorded label, the clause and the outcome", () => {
   const html = renderToStaticMarkup(<GuestSettlements view={VIEW} />);
 
-  expect(html).toContain("The operator cancelled day 1 for weather. Your deposit: USD 25.00 refunded.");
+  expect(html).toContain("The operator cancelled day 1 for weather. Gale Warning (NWS) was in force.");
+  // amounts come from the stored lines, not from the sentence (step 11 may draft the sentence)
+  expect(html).toContain("Your deposit: USD 25.00 refunded");
   expect(html).toContain("Gale Warning");
   expect(html).toContain("recorded at 2026-10-19 11:00 UTC, replayed");
   expect(html).toContain("If a Gale Warning is in force and we cancel a dive day, you get a full refund.");
@@ -50,4 +52,19 @@ it("shows the operator's cancellation, the warning with its recorded label, the 
 
 it("shows nothing when the operator has cancelled nothing", () => {
   expect(renderToStaticMarkup(<GuestSettlements view={{ settlements: [], credits: [] }} />)).toBe("");
+});
+
+it("words each outcome from its kind and payment", () => {
+  const base = { amount_minor: 15000, credit_expiry_months: null, clauses: [] };
+  expect([
+    outcomeText({ ...base, purpose: "balance", kind: "refund" }),
+    outcomeText({ ...base, purpose: "deposit", kind: "credit", credit_expiry_months: 12 }),
+    outcomeText({ ...base, purpose: "deposit", kind: "none" }),
+    outcomeText({ ...base, purpose: "deposit", kind: "refund", amount_minor: 0 }),
+  ]).toEqual([
+    "Your balance: USD 150.00 released",
+    "Your deposit: USD 150.00 as credit",
+    "Your deposit: no change",
+    "Your deposit: no change",
+  ]);
 });

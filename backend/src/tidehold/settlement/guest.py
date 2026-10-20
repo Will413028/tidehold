@@ -10,18 +10,10 @@ from typing import Any
 
 from psycopg.rows import DictRow
 
-from tidehold.money.amounts import usd
 from tidehold.platform.db import Conn
 from tidehold.trips import store as trips
 
 CAUSE = {"weather": "for weather", "safety": "for safety", "other": "for another reason"}
-# what a remedy does to each payment: the deposit is returned, the balance hold released
-DONE = {
-    ("refund", "deposit"): "refunded",
-    ("refund", "balance"): "released",
-    ("credit", "deposit"): "as credit",
-    ("credit", "balance"): "as credit",
-}
 DECIDING = "The operator is deciding what this means for your payments."
 
 
@@ -90,9 +82,12 @@ def _explanation(
     days: Sequence[int],
     facts: Mapping[str, Any],
     warnings: Sequence[Mapping[str, Any]],
-    outcomes: Sequence[Outcome] | None,
+    *,
+    decided: bool,
 ) -> str:
-    """The template sentence; step 11's model draft replaces this field, never the facts."""
+    """The narrative only: what the operator cancelled and which warnings were in force. Amounts
+    are shown from the stored lines (`outcomes`), never from this text, which step 11's model
+    draft may replace (the model never supplies amounts)."""
     cancellation = facts["cancellation"]
     what = _what(days, whole_trip=cancellation["whole_trip"])
     parts = [f"The operator cancelled {what} {CAUSE[cancellation['cause']]}."]
@@ -100,13 +95,8 @@ def _explanation(
     names = list(dict.fromkeys(f"{w['event']} ({w['source'].upper()})" for w in warnings))
     if names:
         parts.append(f"{', '.join(names)} {'was' if len(names) == 1 else 'were'} in force.")
-    if outcomes is None:
+    if not decided:
         parts.append(DECIDING)
-        return " ".join(parts)
-    for o in outcomes:
-        done = DONE.get((o.kind, o.purpose))
-        result = f"{usd(o.amount_minor)} {done}" if done and o.amount_minor else "no change"
-        parts.append(f"Your {o.purpose}: {result}.")
     return " ".join(parts)
 
 
@@ -136,7 +126,7 @@ async def view(conn: Conn, token: str) -> tuple[list[Settlement], list[DictRow]]
                 recorded_at=datetime.fromisoformat(cancellation["recorded_at"]),
                 warnings=warnings,
                 outcomes=outcomes,
-                explanation=_explanation(days, facts, warnings, outcomes if decided else None),
+                explanation=_explanation(days, facts, warnings, decided=decided),
             )
         )
     credits = await (

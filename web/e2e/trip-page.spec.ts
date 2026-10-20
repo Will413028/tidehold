@@ -116,7 +116,9 @@ test("the operator replays a recorded gale, cancels the day and decides the sett
   await page.goto(link ?? "");
   const cancellations = page.getByRole("region", { name: "Cancellations" });
   await expect(cancellations).toContainText("The operator cancelled day 1 for weather.");
-  await expect(cancellations).toContainText("Your deposit: USD 25.00 refunded.");
+  await expect(cancellations.getByRole("list", { name: "Your outcome" })).toContainText(
+    "Your deposit: USD 25.00 refunded",
+  );
   await expect(cancellations.getByRole("list", { name: "Official warnings in force" })).toContainText(
     /Gale Warning \(NWS\).*recorded at .* UTC, replayed/,
   );

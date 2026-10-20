@@ -1035,9 +1035,10 @@ async def test_a_guest_sees_the_cancellation_the_warning_the_clause_and_its_own_
         1666,
         [GALE_CLAUSE],
     )
+    # the sentence is narrative only: amounts come from the stored lines, never from text a
+    # model may draft in its place (step 11; the model never supplies amounts)
     assert settlement["explanation"] == (
         "The operator cancelled day 2 for weather. Gale Warning (NWS) was in force."
-        " Your deposit: USD 16.66 refunded. Your balance: USD 100.00 released."
     )
     # only this guest: no other guest's name or amount, and no internal ids
     assert "Ben" not in response.text
@@ -1083,7 +1084,12 @@ async def test_a_guest_sees_its_credit(
 
     assert [(c["purpose"], c["amount_minor"]) for c in view["credits"]] == [("deposit", 5000)]
     assert view["credits"][0]["expires_at"] is not None
-    assert "Your deposit: USD 50.00 as credit" in view["settlements"][0]["explanation"]
+    outcome = view["settlements"][0]["outcomes"][0]
+    assert (outcome["purpose"], outcome["kind"], outcome["amount_minor"]) == (
+        "deposit",
+        "credit",
+        5000,
+    )
     assert (await client.get("/api/guest/unknown-token/settlement")).status_code == 404
 
 

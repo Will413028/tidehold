@@ -2,6 +2,23 @@ import { recordedLabel } from "@/lib/evidence";
 import { formatUsd } from "@/lib/money";
 import type { SettlementView } from "./types";
 
+type Outcome = SettlementView["settlements"][number]["outcomes"][number];
+
+// what a remedy does to each payment: the deposit is returned, the balance hold released
+const DONE: Record<string, string> = {
+  "refund:deposit": "refunded",
+  "refund:balance": "released",
+  "credit:deposit": "as credit",
+  "credit:balance": "as credit",
+};
+
+/** One payment's outcome, from the stored line computed by code (never from drafted text). */
+export function outcomeText(o: Outcome): string {
+  const done = DONE[`${o.kind}:${o.purpose}`];
+  const result = done && o.amount_minor > 0 ? `${formatUsd(o.amount_minor)} ${done}` : "no change";
+  return `Your ${o.purpose}: ${result}`;
+}
+
 /** The guest's transparency section (R12): the operator's cancellation, the official warning in
  * force at its decision, the clause behind the outcome and this guest's outcome. */
 export function GuestSettlements({ view }: { view: SettlementView }) {
@@ -12,6 +29,13 @@ export function GuestSettlements({ view }: { view: SettlementView }) {
       {view.settlements.map((s) => (
         <article key={s.recorded_at}>
           <p>{s.explanation}</p>
+          {s.outcomes.length > 0 && (
+            <ul aria-label="Your outcome">
+              {s.outcomes.map((o) => (
+                <li key={o.purpose}>{outcomeText(o)}</li>
+              ))}
+            </ul>
+          )}
           {s.warnings.length > 0 && (
             <ul aria-label="Official warnings in force">
               {s.warnings.map((w) => (
