@@ -22,15 +22,20 @@ by the operator, never for cancellations by the guest.
 - `product`: when the wording has separate sections for different products (day trips, \
 liveaboards, courses), the heading of the section the rule is in, copied exactly; otherwise null.
 - A rule needs a cause above: a clause only about other causes (e.g. mechanical issues alone) is \
-not a weather rule. Lists that include a catch-all ("other circumstances", "operational \
-reasons", "force majeure") are "any".
+not a weather rule. When the passage lists weather together with a catch-all ("or other \
+circumstances", "operational reasons", "force majeure"), `causes` is ["any"] alone: never put \
+"any" next to another cause.
+- A change of dive site, itinerary or schedule is not a cancellation, and a statement that the \
+operator accepts no financial responsibility is not a remedy: write no rule for either. When \
+such a passage contradicts a rule for the same cancellation, ask "conflicting_clauses".
 - `warning`: only when the wording makes the payout conditional on an official warning \
 ("unless there has been an official storm warning issued by ..."). `named_as` is the authority \
 exactly as written. `source` is one of the catalogue sources below if and only if the wording \
 names that service; otherwise null. `event_values` stays empty: event values are chosen later \
 with the operator.
-- `scope`: "per_day" when the wording speaks of a dive, an activity or a day; "per_trip" when it \
-speaks of the trip or the booking.
+- `scope`: "per_day" when the passage is about dives, activities, sessions or days being \
+cancelled or delayed (also inside a course); "per_trip" when it is about the trip, charter, \
+booking or package.
 - `applies_to`: "both" unless the wording limits the remedy to the deposit or to the balance.
 - `remedies`: one entry per alternative the wording offers. "refund" with the percent refunded; \
 "credit" (credit, voucher, rebooking, rescheduling, moving to another date: all are credit) with \
@@ -47,7 +52,8 @@ What needs a ruling (`needs_ruling`), each with a short question for the operato
 passage it is about (`quote`, or null when the wording is silent):
 - "warning_source_unnamed": a warning condition that names no service from the catalogue.
 - "remedy_chooser_unclear": alternatives offered without saying who chooses.
-- "outcome_unspecified": a weather or force-majeure clause that does not say what the guest gets.
+- "outcome_unspecified": a weather or force-majeure clause that does not say what the guest gets, \
+including a list of force-majeure events (storms, natural disasters) with no stated outcome.
 - "operator_discretion": the outcome is left to the operator's discretion or "individual \
 circumstances", even when a figure is given ("a 25% refund, at the operator's discretion"); \
 write no rule for it.

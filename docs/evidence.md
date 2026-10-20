@@ -2,6 +2,24 @@
 
 Measurements, coverage reports and sandbox runs that plan steps cite in their acceptance. Newest first within each step.
 
+## Step 5: policy compilation and rulings
+
+### Live compiles on the VM (2026-10-20 00:21 to 00:51 UTC)
+
+The compile benchmark at prompt `9f7c6e9404b56080` (`docs/plans/2026-10-19-tidehold-hackathon/model-benchmark.md`, newest run) ran the product's compile path (`tidehold.policy.compile_policy`) on oci-a1 with the D13 key file. `groq:openai/gpt-oss-120b`, the default `COMPILE_MODEL`, completed 17 of 18 compiles with live provider calls; the slowest call took 6.7 s and p95 was 6.7 s, against a limit of 60 s. The one failure was a Groq HTTP 400 `json_validate_failed`; in the product that call falls back to the no-AI path (`test_model_failure_falls_back_to_no_ai`). These compiles did not go through the HTTP route and its `model_calls` cap: a VM deploy is step 10, and the route is tested against a fake model. After the run the fallback demo answered 200.
+
+### Mutations (2026-10-20, local)
+
+Each mutation below made at least one test fail; the code was restored afterwards.
+
+| Mutation | Test that failed |
+|---|---|
+| Skip span verification when publishing | `test_a_fabricated_span_is_rejected`, `test_a_warning_condition_quote_must_be_found_too` |
+| Never reach the daily cap | `test_daily_cap_replays_recorded_results_then_stops_live_calls` |
+| Let a model failure through instead of falling back | `test_model_failure_falls_back_to_no_ai`, `test_a_failed_live_call_replays_a_recorded_result_for_the_same_input` |
+| Drop Groq's output-token cap | `test_every_provider_call_caps_its_output_tokens[groq]` |
+| Change one line of the compile prompt | `test_the_configured_model_and_prompt_are_the_last_benchmarked` |
+
 ## Step 7: official warnings and corroboration
 
 ### Recorded feeds read into the evidence store (2026-10-19 14:00 UTC)
