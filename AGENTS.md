@@ -50,4 +50,4 @@ Web (`web/src/`): `app` → `features` → `lib`. A feature does not import anot
 
 - Agents do not add or upgrade dependencies on their own: list the package and version, confirm it exists and is not newly registered (check the registry's release history), and wait for approval.
 - New releases are taken only after a week: `exclude-newer = "1 week"` in `backend/pyproject.toml`, `minimumReleaseAge: 10080` in `web/pnpm-workspace.yaml`, Dependabot `cooldown` 7 days. Lockfiles are committed; osv-scanner lists them explicitly, so a new lockfile is added to `make security` and to `osv-scan-args` in `security.yml`.
-- Vulnerability fix deadlines from the advisory's publication: critical 7 days, high 14 days, moderate and low 30 days. Report channel: `SECURITY.md`.
+- Vulnerability fix deadlines from the advisory's publication: critical 7 days, high 14 days, moderate and low 30 days. A security fix does not wait out the release week: add the package to `exclude-newer-package` in `backend/pyproject.toml` (or `minimumReleaseAgeExclude` in `web/pnpm-workspace.yaml`) with the advisory id, and remove the entry once the release is a week old. Report channel: `SECURITY.md`.
