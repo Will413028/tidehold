@@ -1,0 +1,23 @@
+name: Security
+
+# The same checks as Will413028/fullstack-template, called at a pinned commit so a fix there reaches this repository
+# through one pin update: actionlint + zizmor, gitleaks over the whole history, and osv-scanner over the lockfiles
+# named here. The weekly run rescans main, since malicious-package records often appear after a version is already
+# in a lockfile; scheduled runs get only the vulnerability scan.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    uses: Will413028/fullstack-template/.github/workflows/security.yml@0aeefffef7e508880e0e479664d1ff8def687658 # main 2026-10-22
+    with:
+      osv-scan-args: -L backend/uv.lock -L web/pnpm-lock.yaml
