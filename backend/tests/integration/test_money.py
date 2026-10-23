@@ -16,7 +16,7 @@ from tests.integration.fake_paypal import FakePayPal
 from tidehold.identity.sessions import new_workspace
 from tidehold.money import commands, service
 from tidehold.money.commands import Intent, Purpose
-from tidehold.money.paypal import TEST_CARD, PayPalUnknownOutcome
+from tidehold.money.paypal import TEST_CARD, PayPalClient, PayPalUnknownOutcome, SandboxCard
 from tidehold.platform import due_actions as due
 from tidehold.platform.db import Conn, connect
 from tidehold.platform.errors import Conflict, LimitReached
@@ -289,7 +289,7 @@ async def test_a_refused_resend_keeps_the_command_open_and_its_key(conn: Conn) -
     again = await service.reconcile(conn, fake.client(), payment_id)
 
     row = await _command(conn, command["id"])
-    assert first == again == {command["id"]: "unknown"}
+    assert (first, again) == ({command["id"]: "unknown"}, {command["id"]: "held"})
     assert (row["status"], row["error_code"]) == ("unknown", "PAYPAL_DECLINED")
     assert row["request_id"] == command["request_id"]
     assert row["resend_refused_at"] is not None
@@ -314,7 +314,7 @@ async def test_a_refused_resend_of_a_hold_capture_is_marked_and_not_sent_again(c
     again = await service.reconcile(conn, fake.client(), payment_id)
 
     row = await _command(conn, command["id"])
-    assert first == again == {command["id"]: "unknown"}
+    assert (first, again) == ({command["id"]: "unknown"}, {command["id"]: "held"})
     assert (row["error_code"], row["resend_refused_at"] is not None) == ("PAYPAL_DECLINED", True)
     assert fake.posts("/capture") == 2
     with pytest.raises(psycopg.errors.UniqueViolation):
@@ -449,16 +449,18 @@ async def test_a_pending_refund_stays_open_until_paypal_completes_it(conn: Conn)
     assert fake.posts("/refund") == 1
 
 
-async def _reconcile_runs(conn: Conn, fake: FakePayPal, payment_id: UUID) -> list[str]:
+async def _reconcile_runs(
+    conn: Conn, fake: FakePayPal, payment_id: UUID, start: datetime | None = None
+) -> list[str]:
     """Run the payment's `reconcile_payment` action until it is no longer pending (at most 12
-    runs, an hour apart); the action's state after each run."""
+    runs, an hour apart, from `start`); the action's state after each run."""
 
     async def reconcile(c: Conn, action: due.Action, _: datetime) -> None:
         assert action.payment_id is not None
         await service.reconcile_due(c, fake.client(), action.payment_id)
 
     states: list[str] = []
-    now = datetime.now(UTC)
+    now = start or datetime.now(UTC)
     for _ in range(12):
         now += timedelta(hours=1, minutes=1)
         await due.run_due(conn, {"reconcile_payment": reconcile}, now)
@@ -509,6 +511,7 @@ async def test_a_refund_read_back_with_another_amount_is_not_waited_on(conn: Con
 
 
 async def test_a_pending_refund_beside_an_unknown_one_still_backs_off(conn: Conn) -> None:
+    """The unknown one's read fails: a failure, counted even while a refund beside it waits."""
     fake = FakePayPal()
     fake.refund_status = "PENDING"
     payment_id = await _paid(conn, fake, "deposit")
@@ -521,6 +524,72 @@ async def test_a_pending_refund_beside_an_unknown_one_still_backs_off(conn: Conn
 
     with pytest.raises(due.RetryLater):
         await service.reconcile_due(conn, fake.client(), payment_id)
+
+
+async def test_a_pending_refund_beside_a_refused_resend_is_read_until_it_ends(
+    conn: Conn,
+) -> None:
+    """A refund whose resend PayPal refused waits for the operator (step 8b); it is not a failed
+    read, so the refund beside it, PENDING at PayPal, is read for longer than the failures in a
+    row allow, until PayPal completes it."""
+    fake = FakePayPal()
+    fake.refund_status = "PENDING"
+    payment_id = await _paid(conn, fake, "deposit")
+    pending = await _refund(conn, payment_id, 1000)
+    await service.execute(conn, fake.client(), pending["id"])
+    fake.lose_first.add("refund")
+    lost = await _refund(conn, payment_id, 1000)
+    await service.execute(conn, fake.client(), lost["id"])
+    fake.refuse.add("refund")
+    assert await service.reconcile(conn, fake.client(), payment_id) == {
+        pending["id"]: "pending",
+        lost["id"]: "unknown",  # its resend refused, and marked
+    }
+
+    waiting = await _reconcile_runs(conn, fake, payment_id)
+    fake.settle_refunds()
+    ended = await _reconcile_runs(conn, fake, payment_id, datetime.now(UTC) + timedelta(hours=13))
+
+    assert waiting == ["pending"] * 12
+    assert (await _command(conn, pending["id"]))["status"] == "succeeded"
+    assert (await _command(conn, lost["id"]))["status"] == "unknown"
+    assert ended[-1] == "failed"  # held alone, it still ends for the operator console
+    assert fake.posts("/refund") == 3  # the pending one, the lost one and its refused resend
+
+
+async def test_reconciliation_leaves_a_refund_a_settlement_just_sent_to_a_read(
+    conn: Conn, database_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reconciliation read the refund's row while it was not sent yet; a settlement sends it
+    (its answer lost) before reconciliation does: reconciliation does not send it blind, and
+    the next run reads PayPal and finds it."""
+    fake = FakePayPal()
+    payment_id = await _paid(conn, fake, "deposit")
+    command = await _refund(conn, payment_id, 1000)
+    send = service.execute
+
+    async def settlement_sends_first(
+        c: Conn,
+        client: PayPalClient,
+        command_id: UUID,
+        card: SandboxCard | None = None,
+        *,
+        first_send: bool = False,
+    ) -> service.Outcome:
+        fake.time_out_first.add("refund")
+        async with await connect(database_url) as settlement:
+            await send(settlement, fake.client(), command_id, first_send=True)
+        fake.refuse.add("refund")  # a resend now would be refused
+        return await send(c, client, command_id, card, first_send=first_send)
+
+    monkeypatch.setattr(service, "execute", settlement_sends_first)
+    first = await service.reconcile(conn, fake.client(), payment_id)
+    monkeypatch.undo()
+    then = await service.reconcile(conn, fake.client(), payment_id)
+
+    assert (first, then) == ({command["id"]: "unknown"}, {command["id"]: "succeeded"})
+    assert fake.posts("/refund") == 1
+    assert (await _command(conn, command["id"]))["resend_refused_at"] is None
 
 
 async def test_a_test_card_payment_keeps_its_order_id(conn: Conn) -> None:

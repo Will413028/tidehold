@@ -1377,3 +1377,105 @@ async def test_a_guest_sees_a_live_warning_and_its_replay_apart(
     [settlement] = (await _settlement_view(client, token))["settlements"]
 
     assert sorted(w["replayed"] for w in settlement["warnings"]) == [False, True]
+
+
+async def _deposit_id(conn: Conn, trip_id: str) -> UUID:
+    row = await (
+        await conn.execute(
+            "select deposit_payment_id as id from guests where trip_id = %s", (trip_id,)
+        )
+    ).fetchone()
+    assert row is not None
+    deposit: UUID = row["id"]
+    return deposit
+
+
+async def test_a_settlement_waiting_on_a_pending_refund_asks_when_paypal_fails_it(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+) -> None:
+    """The read that ends the refund FAILED runs while the settlement's action is running, so
+    its wake is dropped; the settlement still runs again and asks the operator, with PayPal's
+    reason."""
+    trip = await _trip(operator, [WHOLE_TRIP_RULE])
+    await _guest(operator, client, conn, paypal, trip["id"])
+    paypal.refund_status = "PENDING"
+    await _cancel(operator, trip["id"], "rest", 1)
+    deposit = await _deposit_id(conn, trip["id"])
+    handlers = worker.handlers(paypal.client())
+
+    async def settle_while_paypal_fails_it(c: Conn, action: due.Action, now: datetime) -> None:
+        try:
+            await handlers["settle_proposal"](c, action, now)
+        finally:
+            paypal.settle_refunds("FAILED")
+            assert await service.reconcile(c, paypal.client(), deposit) != {}
+
+    now = _now()
+    await due.run_due(conn, {**handlers, "settle_proposal": settle_while_paypal_fails_it}, now)
+    assert await _settle_actions(conn) == ["pending"]  # one action: the read's wake was dropped
+    await _tick(conn, paypal, now + service.PENDING_REFUND_READ_EVERY + timedelta(minutes=1))
+
+    asks = [p for p in await _proposals(operator, trip["id"]) if p["kind"] == "money_refused"]
+    assert [a["facts"]["code"] for a in asks] == ["PAYPAL_REFUND_FAILED"]
+    assert await _settle_actions(conn) == ["done"]
+
+
+async def test_a_settlement_reads_a_refund_whose_read_was_dropped(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+) -> None:
+    """The refund's answer is lost while the deposit's `reconcile_payment` is running, so the
+    send's wake is dropped and that run ends without it: the settlement has it read, and ends."""
+    trip = await _trip(operator, [WHOLE_TRIP_RULE])
+    await _guest(operator, client, conn, paypal, trip["id"])
+    proposal = await _cancel(operator, trip["id"], "rest", 1)
+    deposit = await _deposit_id(conn, trip["id"])
+    await due.schedule(conn, "reconcile_payment", deposit, due_at=_now())
+    await conn.execute(
+        "update due_actions set state = 'running', attempts = 1,"
+        " lease_until = now() + interval '1 minute' where payment_id = %s",
+        (deposit,),
+    )
+    paypal.time_out_first.add("refund")
+
+    with pytest.raises(due.RetryLater):
+        await execute.settle(conn, paypal.client(), UUID(proposal["id"]), _now())
+    await conn.execute(
+        "update due_actions set state = 'done', lease_until = null, finished_at = now()"
+        " where payment_id = %s",
+        (deposit,),
+    )
+    now = _now()
+    for _ in range(due.MAX_ATTEMPTS):
+        now += timedelta(minutes=31)
+        await _tick(conn, paypal, now)
+
+    states = {p["kind"]: p["state"] for p in await _proposals(operator, trip["id"])}
+    assert states == {"settlement": "executed"}
+    assert paypal.posts("/refund") == 1
+
+
+async def test_a_settlement_whose_pending_refund_is_no_longer_read_fails(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+) -> None:
+    """The refund's reads kept failing and its `reconcile_payment` gave up: the settlement does
+    not wait on it forever, it fails too, for the operator console."""
+    trip = await _trip(operator, [WHOLE_TRIP_RULE])
+    await _guest(operator, client, conn, paypal, trip["id"])
+    paypal.refund_status = "PENDING"
+    await _cancel(operator, trip["id"], "rest", 1)
+    paypal.fail_reads.add("/v2/payments/refunds/")
+
+    now = _now()
+    for _ in range(4 * due.MAX_ATTEMPTS):
+        await _tick(conn, paypal, now)
+        if "failed" in await _settle_actions(conn):
+            break
+        now += timedelta(minutes=31)
+    else:
+        pytest.fail("the settlement waited on a refund nobody reads")
+
+    failed = await (
+        await conn.execute("select kind from due_actions where state = 'failed' order by kind")
+    ).fetchall()
+    assert [r["kind"] for r in failed] == ["reconcile_payment", "settle_proposal"]
+    assert paypal.posts("/refund") == 1

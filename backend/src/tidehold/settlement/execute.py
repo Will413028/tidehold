@@ -111,6 +111,24 @@ async def _send(
     return _status(existing)
 
 
+async def _being_read(conn: Conn, payment_id: UUID) -> bool:
+    """Whether a `reconcile_payment` reads the payment's open command, scheduling one when the
+    last ended (its wake can be dropped while it runs); False once the reads gave up (failed),
+    which the operator console shows."""
+    last = await (
+        await conn.execute(
+            "select state from due_actions where kind = 'reconcile_payment' and payment_id = %s"
+            " order by id desc limit 1",
+            (payment_id,),
+        )
+    ).fetchone()
+    if last is not None and last["state"] == "failed":
+        return False
+    if last is None or last["state"] == "done":
+        await due.schedule(conn, "reconcile_payment", payment_id, due_at=None)
+    return True
+
+
 def _status(command: DictRow) -> str:
     """What one move's command means for its settlement:
     - `refused`: closed before PayPal (window, bound), never sent; the operator decides;
@@ -207,6 +225,7 @@ async def settle(conn: Conn, client: PayPalClient | None, proposal_id: UUID, now
         )
     ).fetchall()
     statuses: list[str] = []
+    unread = False
     for guest in await trips.guests(conn, proposal["trip_id"]):
         await _late_deposit(conn, proposal, guest)
         for payment_id, move in _moves(proposal, guest, accepted):
@@ -214,16 +233,28 @@ async def settle(conn: Conn, client: PayPalClient | None, proposal_id: UUID, now
             statuses.append(status)
             if status in ("rejected", "refused"):
                 await _refused(conn, proposal, guest, (payment_id, move))
-    if "unknown" in statuses or "pending" in statuses:
-        raise due.RetryLater("PAYPAL_OUTCOME_STILL_UNKNOWN")
-    if "processing" in statuses or "refused" in statuses:
-        # a pending refund's read runs this again when it ends; a refusal before PayPal keeps
-        # the settlement accepted, for the operator (plan step 8b)
-        return
+            if status in ("unknown", "processing"):
+                unread = not await _being_read(conn, payment_id) or unread
+    if not _final(statuses, unread=unread):
+        return  # a refusal before PayPal keeps the settlement accepted, for the operator (8b)
     await conn.execute(
         "update proposals set state = 'executed' where id = %s and state = 'accepted'",
         (proposal_id,),
     )
+
+
+def _final(statuses: list[str], *, unread: bool) -> bool:
+    """Whether the settlement is executed now that its moves ran; raises to run it again while
+    a move is not final."""
+    if "unknown" in statuses or "pending" in statuses:
+        raise due.RetryLater("PAYPAL_OUTCOME_STILL_UNKNOWN")
+    if unread:
+        raise due.RetryLater("PAYPAL_REFUND_NOT_READ")
+    if "processing" in statuses:
+        # run again on the read's own interval until every move is final: the read's wake
+        # only speeds this up, and it is dropped while this action is running
+        raise due.Waiting(service.PENDING_REFUND_READ_EVERY, "PAYPAL_REFUND_PENDING")
+    return "refused" not in statuses
 
 
 async def _refused(

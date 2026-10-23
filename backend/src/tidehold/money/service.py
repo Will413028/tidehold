@@ -34,9 +34,10 @@ from tidehold.platform.db import Conn
 from tidehold.platform.errors import Conflict, DomainError
 
 Outcome = Literal["succeeded", "rejected", "unknown"]
-# What a read tells reconciliation: an outcome, or `pending`, PayPal still processing a refund
-# (not a failure: it is read again until it ends, D18 D4).
-ReadOutcome = Literal["succeeded", "rejected", "unknown", "pending"]
+# What a read tells reconciliation: an outcome; `pending`, PayPal still processing a refund
+# (not a failure: it is read again until it ends, D18 D4); or `held`, a command PayPal refused
+# to resend that no read settles, left for the operator (step 8b), not a failed read.
+ReadOutcome = Literal["succeeded", "rejected", "unknown", "pending", "held"]
 # How often a refund PayPal reports PENDING is read again. Such a refund can stay pending for
 # days (an eCheck payment, per the developer's review of 2026-10-23; PayPal's refund status
 # reference could not be read from the build container, so the duration is unverified), and the
@@ -196,8 +197,9 @@ async def execute(
 
 
 # What a read of PayPal says about a command: settled either way, still undecided (nothing is
-# sent or recorded), or not done at PayPal (send it again under its key).
-Read = Literal["succeeded", "rejected", "undecided", "resend"]
+# sent or recorded), not done at PayPal (send it again under its key), or held: not done as far
+# as the read shows, but PayPal refused its resend already.
+Read = Literal["succeeded", "rejected", "undecided", "resend", "held"]
 REFUND_SETTLED: dict[str, Read] = {
     "COMPLETED": "succeeded",
     "FAILED": "rejected",
@@ -284,7 +286,7 @@ async def _read(
     except PayPalUnknownOutcome:
         return "undecided", None
     if read == "resend" and command["resend_refused_at"] is not None:
-        return "undecided", None  # PayPal refused it once already; the operator decides (8b)
+        return "held", None  # PayPal refused it once already; the operator decides (8b)
     return read, result
 
 
@@ -315,6 +317,8 @@ async def _settle_from_read(
             await commands.complete(
                 conn, command["id"], "unknown", result=result, error_code=command["error_code"]
             )
+    if read == "held":
+        return "held"
     return "pending" if (result or {}).get("status") == "PENDING" else "unknown"
 
 
@@ -335,25 +339,46 @@ async def reconcile(
         read, result = await _read(client, command, payment)
         try:
             outcomes[command_id] = await (
-                execute(conn, client, command_id, card)
+                # a command never sent is sent as its first send: if someone sent it since this
+                # read its row, it is left to the next run, which reads PayPal first
+                execute(conn, client, command_id, card, first_send=command["sent_at"] is None)
                 if read == "resend"
                 else _settle_from_read(conn, command, read, result)
             )
-        except DomainError as error:  # completed meanwhile, or not sendable: the others go on
+        except Conflict as error:
+            if error.code != "MONEY_COMMAND_ALREADY_SENT":
+                outcomes[command_id] = error.code  # completed meanwhile, or not sendable
+                continue
+            outcomes[command_id] = await _sent_since(conn, command_id)
+        except DomainError as error:  # not sendable: the others go on
             outcomes[command_id] = error.code
     return outcomes
+
+
+async def _sent_since(conn: Conn, command_id: UUID) -> str:
+    """A command someone else sent while reconciliation was about to: its outcome if it has
+    one, else `unknown`, so the action runs again and reads PayPal first."""
+    row = await (
+        await conn.execute("select status from money_commands where id = %s", (command_id,))
+    ).fetchone()
+    status = "unknown" if row is None else str(row["status"])
+    return "unknown" if status == "pending" else status
 
 
 async def reconcile_due(conn: Conn, client: PayPalClient, payment_id: UUID) -> None:
     """The `reconcile_payment` due action: settle the payment's open commands. While an outcome
     is unknown (a read or a send that failed) it backs off and, after the failures in a row
     `due_actions` allows, fails for the operator; a refund PayPal reports PENDING is only
-    waiting, so it is read again every `PENDING_REFUND_READ_EVERY` until it ends."""
+    waiting, so it is read again every `PENDING_REFUND_READ_EVERY` until it ends. A command held
+    for the operator does not count as a failure while a refund beside it is still read; alone,
+    it backs off and fails for the operator console, until step 8b asks."""
     outcomes = await reconcile(conn, client, payment_id, TEST_CARD)
     if "unknown" in outcomes.values():
         raise due.RetryLater("PAYPAL_OUTCOME_STILL_UNKNOWN")
     if "pending" in outcomes.values():
         raise due.Waiting(PENDING_REFUND_READ_EVERY, "PAYPAL_REFUND_PENDING")
+    if "held" in outcomes.values():
+        raise due.RetryLater("PAYPAL_RESEND_REFUSED")
 
 
 class PaymentRefused(Conflict):

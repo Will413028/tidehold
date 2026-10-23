@@ -82,6 +82,11 @@ Each made the named test fail; the code was restored afterwards.
 | `wait` without the lease's fencing token (closing review) | `test_a_worker_that_lost_its_lease_cannot_make_the_action_wait` |
 | `retry` counts claims instead of failures (closing review) | `test_waiting_is_not_a_failure_and_starts_the_failures_in_a_row_over` |
 | Any read result counts as pending (closing review) | `test_a_refund_read_back_with_another_amount_is_not_waited_on` |
+| A settlement with a pending refund completes (`return`) instead of `Waiting` (second independent review) | `test_a_settlement_waiting_on_a_pending_refund_asks_when_paypal_fails_it` (the settlement's action was `done`, so the dropped wake left nothing to run it) |
+| A command held for the operator (resend refused) counts toward `RetryLater` (second independent review) | `test_a_pending_refund_beside_a_refused_resend_is_read_until_it_ends` (the action failed at the 8th run while the refund was still PENDING) |
+| Reconciliation claims a never-sent command without `first_send` (second independent review) | `test_reconciliation_leaves_a_refund_a_settlement_just_sent_to_a_read` (2 refund POSTs instead of 1) |
+| A settlement does not schedule a read when the last one ended (its design review) | `test_a_settlement_reads_a_refund_whose_read_was_dropped` (the settlement stayed `accepted`) |
+| A settlement keeps waiting after the refund's reads gave up (its design review) | `test_a_settlement_whose_pending_refund_is_no_longer_read_fails` (the settlement waited on a refund nobody reads) |
 
 ### Coverage of the money path (2026-10-19, report only)
 
