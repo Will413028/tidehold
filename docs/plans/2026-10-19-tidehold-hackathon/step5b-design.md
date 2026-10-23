@@ -83,3 +83,47 @@ A second independent reviewer read the committed implementation (2e2ebd9) on 202
 | 5 | A deduction cannot be edited or removed in the web editor, so a narrowed rule quote meets `DEDUCTION_OUTSIDE_RULE` with no way out in the UI | LOW | Recorded for step 9 (rule editor); reported to the developer |
 | 6 | `key={d.label}` collides on two deductions with the same label | LOW | Fixed: keyed by label and quote |
 | 7 | The prompt never says a deduction from another passage stays out of the remedy | LOW | Fixed in the `deduction_conditional` item (prompt hash `76c549dec3d3f42d`) |
+
+## Fix round after the developer's local acceptance (2026-10-23)
+
+The developer's independent reviewer found 2 MED and 1 LOW: (1) a `deduction_conditional` ruling with a null quote, or quoting the same fee elsewhere, never overlaps the rule, so once answered the settlement deducts inside the mandate without asking; (2) a ruling quote that occurs in two products' clauses covers only the first, so a trip on the second product does not ask; (3) a quote whose first occurrence straddles rule A's boundary and whose second lies inside rule B leaves A unasked. Developer's decisions (2026-10-23): the check is structural and on publish; `deduction_unspecified` (no figure, so no `Deduction`) must overlap a rule's clause; a deduction ruling quoting a passage outside every rule is refused on publish and invalid on compile, and Mike's Dauin's label goes back to `no_weather_clause` alone.
+
+- Every occurrence counts. `spans.locate_all` returns every occurrence of a quote in the wording (folded as `locate` folds). A stored ruling keeps `span` (the occurrence shown: inside a rule's clause when there is one) and gains `spans` (every occurrence). `settlement/proposals.py` reads `spans` (falling back to `[span]` for a ruling stored without it) when it asks whether a free-text ruling covers a rule; `evaluate.ruled_in_text` is unchanged. Chosen over matching text at evaluation: the offsets are computed once, on publish, by the same locator, and the settlement keeps reading spans only (the smallest change that makes every covered rule ask). This fixes (2) and (3): every occurrence that overlaps a rule's clause marks that rule.
+- Publish (`versions.check`): a `deduction_conditional` ruling must have a quote one of whose occurrences overlaps a stored deduction span; a `deduction_unspecified` ruling must have a quote one of whose occurrences overlaps a rule's clause (or its warning clause). Otherwise `Invalid("DEDUCTION_RULING_OFF_RULE")`. A conditional deduction without a figure is asked as `deduction_unspecified` (it has no `Deduction` to overlap).
+- Compile: the same test on the kept rules; an unplaced ruling alone triggers the retry. A deduction ruling that fails it is named in the retry note (with lost rules' quotes); after the last attempt it is replaced by a `span_not_found` item ("a question about a deduction the compiler could not tie to a rule's clause"), as a lost rule is. On publish a `span_not_found` item covers every clause and deduction of the submitted rules (`spans`), so an unquoted conditional or unspecified question still makes every rule ask (developer, 2026-10-23, start review finding 1 and closing review finding 1). A `span_not_found` for a lost rule covers them too: more asks, never fewer.
+- No escape needed when nothing is deducted: the `deduction_conditional` check is skipped when no submitted rule has a deduction (developer, 2026-10-23, start review finding 3), so an operator who removes the fee can still publish from the compilation.
+- Prompt and GUIDELINE: a deduction ruling quotes the deduction inside the rule's passage; a fee stated only in a separate passage is neither written in a remedy nor asked about (ADR D3: without a deduction in the rule the guest gets the full amount). The `deduction_conditional` definition drops "applied by a separate passage". Mike's Dauin: `no_weather_clause` only (labels version 3). The retry note for a deduction quoted outside its rule says to remove it from the remedy.
+- Threat model: the residual "a ruling the model leaves unquoted names no clause" is removed.
+- `spans` is stored for every topic, so a warning, discretion or expiry ruling whose quote recurs marks every rule it occurs in: more asks, never fewer; the API's version view returns it (the web does not read ruling spans). A compilation stored before this round can now fail publish in a development database; recreate it.
+- Tests: publish refuses a `deduction_conditional` ruling with a null quote and one quoting the fee outside the rule (`DEDUCTION_RULING_OFF_RULE`), and a `deduction_unspecified` ruling off every rule; a valid one settles asked with `RULED_IN_TEXT` (existing one-remedy test); two products whose clauses carry the same conditional fee sentence, one ruling, a trip on each product asks with `RULED_IN_TEXT`; the straddle case (first occurrence crossing rule A's clause boundary, second inside rule B) asks on both; compile replaces an off-rule deduction ruling with `span_not_found` after the retry. Mutations: drop the overlap check (publish test fails); keep only the first occurrence in `spans` (two-product test fails).
+- The prompt hash changes again.
+
+### Review at start of the fix round
+
+An independent reviewer read this section against the plan, the ADR and the code on 2026-10-23. 9 findings:
+
+| # | Finding | Severity | Outcome |
+|---|---|---|---|
+| 1 | The compile fallback reopens the hole: a null-quoted conditional ruling becomes an unquoted `span_not_found`, the deducting rule is kept, and a one-remedy rule settles with the deduction | HIGH | Developer chose: the replacement covers every deduction; `test_an_unquoted_conditional_ruling_is_replaced_by_one_covering_every_deduction` |
+| 2 | The fixture test and the unquoted control contradict the new check | MED | Fixed: the fixture test quotes Scuba Tribe's fee; the control is replaced by finding 1's test; threat model updated |
+| 3 | No way to publish from a compilation after removing the fee | MED | Developer chose: skip the conditional check when no rule deducts; `test_a_conditional_ruling_with_nothing_deducted_is_not_checked` |
+| 4 | No test separates the conditional (deduction) target from the clause target | MED | Fixed: a conditional ruling quoting the rule's refund sentence is refused (mutation fails it) |
+| 5 | One conditional ruling quoting rule A's fee leaves a different fee in rule B unasked | LOW | Recorded as a residual: the compiler raises one ruling per deduction it finds conditional; requiring each deducting rule to be covered would refuse an unconditional fee in B |
+| 6 | `spans` applies to every topic | LOW | Kept (asks more, never fewer), stated above |
+| 7 | `locate_all` unspecified (overlap, folding, offsets) | LOW | Built to advance one folded character and map back through `origin`; unit test with overlapping and typographic occurrences |
+| 8 | An unplaced ruling alone must trigger the retry | LOW | Built and tested (`test_a_deduction_ruling_off_every_rule_alone_is_retried_then_replaced`) |
+| 9 | No migration; old compilations may fail publish in dev databases | — | Noted above |
+
+### Review before commit of the fix round
+
+An independent reviewer read the uncommitted fix round on 2026-10-23. 0 HIGH, 1 MED, 5 LOW:
+
+| # | Finding | Severity | Outcome |
+|---|---|---|---|
+| 1 | The replacement for an unplaced `deduction_unspecified` covers deductions only, and an unspecified fee has none, so a one-remedy rule refunds the full amount without asking | MED | Developer chose: every `span_not_found` item covers every clause and deduction; `test_an_unquoted_unspecified_deduction_ruling_makes_every_rule_ask` (mutation: deductions only) |
+| 2 | Publish refuses an operator's edit that removes a conditional fee while another rule keeps a fee, or that shortens the quoted rule | LOW | Recorded: the escapes are recompiling or publishing by hand; the check is skipped only when no rule deducts (developer's decision); the editor's deduction controls are step 9's |
+| 3 | The threat model still says a fee in a separate passage becomes a ruling | LOW | Fixed |
+| 4 | A retry-test assertion is vacuous; no test of a ruling placed on the retry | LOW | Fixed: the assertion reads the retry note; `test_a_deduction_ruling_placed_on_the_retry_is_kept` |
+| 5 | `ruled_in_text`'s docstring predates `spans` | LOW | Fixed |
+| 6 | A deduction question filed under another topic escapes the check | LOW | Recorded as a residual in the threat model (the deduction itself is verbatim with its own span) |
+

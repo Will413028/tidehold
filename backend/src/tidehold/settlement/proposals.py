@@ -89,7 +89,8 @@ def _span(stored: Sequence[int] | None) -> Span | None:
 
 def _rules_in(version: DictRow, product: str | None) -> list[tuple[Rule, bool]]:
     """The rules of the trip's product, each with whether a free-text ruling covers it."""
-    ruling_spans = [_span(r["span"]) for r in version["rulings"]]
+    # every occurrence of a ruling's quote (step 5b); a ruling stored before `spans` has one
+    ruling_spans = [_span(at) for r in version["rulings"] for at in r.get("spans", [r["span"]])]
     out: list[tuple[Rule, bool]] = []
     for item in version["rules"]:
         rule = Rule.model_validate(item["rule"])

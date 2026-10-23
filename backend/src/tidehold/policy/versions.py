@@ -8,7 +8,9 @@ two or more remedies say who chooses, and every item the compiler raised has an 
 version is then fixed (a database trigger refuses any change) and trips bind it.
 
 A stored rule item is {rule, span, warning_span, deduction_spans}: offsets into the wording,
-`deduction_spans` per remedy, per deduction (step 5b; the 0008 migration's comment predates it).
+`deduction_spans` per remedy, per deduction; a stored ruling is {topic, question, quote, span,
+spans, answer}, `spans` every occurrence of its quote (step 5b; the 0008 migration's comment
+predates both).
 """
 
 from collections.abc import Sequence
@@ -21,8 +23,9 @@ from psycopg.types.json import Jsonb
 
 from tidehold.platform.db import Conn, insert_returning
 from tidehold.platform.errors import Invalid, NotFound
+from tidehold.policy.compile import off_rule
 from tidehold.policy.schema import Rule, Ruling
-from tidehold.policy.spans import Span, locate, locate_in_clauses, locate_within
+from tidehold.policy.spans import Span, locate, locate_all, locate_in_clauses, locate_within
 from tidehold.warnings import catalogue
 
 MAX_WORDING = 12_000
@@ -96,22 +99,42 @@ def _check_rule(rule: Rule, wording: str) -> dict[str, Any]:
     }
 
 
+def _covered(
+    ruling: Ruling, wording: str, clauses: Sequence[Span], deductions: Sequence[Span]
+) -> list[Span]:
+    """What a ruling covers in the settlement: every occurrence of its quote, so it covers each
+    clause it occurs in; a `span_not_found` item may stand for a rule or a deduction ruling the
+    compiler could not tie to a clause, so it covers every clause and deduction (step 5b)."""
+    if ruling.topic == "span_not_found":
+        return [*clauses, *deductions]
+    return locate_all(ruling.quote, wording) if ruling.quote else []
+
+
 def _check_rulings(
-    asked: Sequence[Ruling], answers: Sequence[Answer], wording: str, clauses: Sequence[Span]
+    asked: Sequence[Ruling],
+    answers: Sequence[Answer],
+    wording: str,
+    clauses: Sequence[Span],
+    deductions: Sequence[Span],
 ) -> list[dict[str, Any]]:
     by_index = {a.index: a.answer.strip() for a in answers}
     if len(by_index) != len(answers) or set(by_index) - set(range(len(asked))):
         raise Invalid("RULING_UNKNOWN")
     if any(not by_index.get(i) for i in range(len(asked))):
         raise Invalid("RULING_UNANSWERED")
+    # A deduction ruling the settlement would not see is refused (step 5b).
+    if any(off_rule(ruling, wording, clauses, deductions) for ruling in asked):
+        raise Invalid("DEDUCTION_RULING_OFF_RULE")
     return [
         {
             "topic": ruling.topic,
             "question": ruling.question,
             "quote": ruling.quote,
+            # the occurrence shown, inside a rule's clause when there is one
             "span": _span(
                 locate_in_clauses(ruling.quote, wording, clauses) if ruling.quote else None
             ),
+            "spans": [_span(at) for at in _covered(ruling, wording, clauses, deductions)],
             "answer": by_index[i],
         }
         for i, ruling in enumerate(asked)
@@ -133,7 +156,10 @@ def check(
     clauses = [
         Span(*item[key]) for item in checked for key in ("span", "warning_span") if item[key]
     ]
-    rulings = _check_rulings(asked, answers, wording, clauses)
+    deductions = [
+        Span(*at) for item in checked for spans in item["deduction_spans"] for at in spans
+    ]
+    rulings = _check_rulings(asked, answers, wording, clauses, deductions)
     return Checked(checked, rulings, next(iter(sources), None))
 
 

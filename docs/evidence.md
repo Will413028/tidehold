@@ -36,7 +36,19 @@ Each change applied alone to the step 5b tree, the named tests run, the change r
 | Publish places a ruling's quote at its first occurrence, not inside a rule's clause (closing review) | `test_a_ruling_on_a_rules_fee_is_placed_in_that_rule_and_the_settlement_asks` |
 | The retry note lists a fee quoted from another passage as "not in the wording" (closing review) | `test_a_deduction_quote_outside_its_rules_quote_loses_the_rule` |
 
-Prompt hash after step 5b: `76c549dec3d3f42d` (was `9f7c6e9404b56080`). The Groq benchmark at the new prompt hash has not run (a human on the VM); until it is appended to `model-benchmark.md`, `test_the_configured_model_and_prompt_are_the_last_benchmarked` fails.
+Fix round after the developer's local acceptance (2026-10-23, cloud container; each against `tests/unit/test_policy.py` and `tests/integration/test_policy_compile.py`):
+
+| Mutation | Fails |
+|---|---|
+| Publish skips the deduction ruling check | `test_a_deduction_ruling_off_its_rule_is_refused_on_publish` (all 5 cases) |
+| A ruling covers only its first occurrence | `test_a_ruling_on_a_rules_fee_is_placed_in_that_rule_and_the_settlement_asks`, `test_one_ruling_on_a_fee_sentence_two_products_share_asks_on_each[Liveaboards:]`, `test_a_ruling_quote_straddling_one_clause_and_inside_another_asks_on_both[Liveaboards:]` |
+| A ruling covers only the occurrence shown (the behaviour before the fix) | `test_one_ruling_on_a_fee_sentence_two_products_share_asks_on_each[Liveaboards:]`, `test_a_ruling_quote_straddling_one_clause_and_inside_another_asks_on_both[Day trips:]`, and 3 more |
+| A conditional ruling is checked against the rules' clauses, not their deductions | `test_a_deduction_ruling_off_its_rule_is_refused_on_publish[ruling1]` |
+| A `span_not_found` item covers nothing | `test_a_span_not_found_item_covers_every_clause_and_deduction`, `test_an_unquoted_conditional_ruling_is_replaced_by_one_covering_every_deduction`, `test_an_unquoted_unspecified_deduction_ruling_makes_every_rule_ask` |
+| A `span_not_found` item covers deductions only (closing review) | `test_a_span_not_found_item_covers_every_clause_and_deduction`, `test_an_unquoted_unspecified_deduction_ruling_makes_every_rule_ask` |
+| Compile does not retry when only a ruling is unplaced | `test_a_deduction_ruling_off_every_rule_alone_is_retried_then_replaced`, `test_an_unquoted_conditional_ruling_is_replaced_by_one_covering_every_deduction` |
+
+Prompt hash after the fix round: `00bdb5c3b65fa352`; after the first 5b commits it was `76c549dec3d3f42d` (was `9f7c6e9404b56080`). The Groq benchmark at the new prompt hash has not run (a human on the VM); until it is appended to `model-benchmark.md`, `test_the_configured_model_and_prompt_are_the_last_benchmarked` fails.
 
 ## Step 7: official warnings and corroboration
 

@@ -278,7 +278,9 @@ def ruled_in_text(
     rule_span: Span, warning_span: Span | None, ruling_spans: Sequence[Span | None]
 ) -> bool:
     """A ruling answered in free text covers this rule when its quote overlaps the rule's
-    clause or its warning condition; a ruling with no quote names no clause."""
+    clause or its warning condition. The caller passes every span a ruling covers (each
+    occurrence of its quote; for a `span_not_found` item every clause and deduction); a ruling
+    that covers none names no clause."""
     clauses = [rule_span] if warning_span is None else [rule_span, warning_span]
     return any(
         span is not None and any(_overlaps(span, clause) for clause in clauses)

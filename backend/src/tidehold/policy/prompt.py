@@ -62,12 +62,13 @@ write no rule for it.
 - "no_weather_clause": the wording has no clause about cancellation for weather.
 - "conflicting_clauses": two passages give different outcomes for the same cancellation.
 - "credit_expiry_unspecified": a credit remedy with no stated expiry.
-- "deduction_unspecified": the wording deducts costs or fees without stating how much.
-- "deduction_conditional": a deduction that applies only on a condition a rule cannot state \
-(e.g. "for online payments", "if paid by card"), that contradicts a promised full refund, or \
-that a separate passage applies to refunds; quote the deduction. When it is inside the rule's \
-passage and has a figure, also write it in the remedy; a deduction stated outside the rule's \
-passage is never written in the remedy.
+- "deduction_unspecified": a rule's passage deducts costs or fees without stating how much; \
+quote the deduction from inside the rule's quote.
+- "deduction_conditional": a deduction with a figure in a rule's passage that applies only on a \
+condition a rule cannot state (e.g. "for online payments", "if paid by card") or that \
+contradicts a promised full refund; write it in the remedy and quote it exactly as the \
+deduction's own `quote`. A fee stated only in a passage outside every rule's quote is neither \
+written in a remedy nor asked about.
 - "other": anything else the wording leaves open about weather cancellations.
 Do not invent rules for what the wording leaves open; ask instead. Do not ask about clauses \
 that only concern cancellations by the guest, no-shows, course failures, or fees charged when \

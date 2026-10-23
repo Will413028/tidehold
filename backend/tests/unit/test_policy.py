@@ -6,11 +6,14 @@ from typing import Any
 import httpx2 as httpx
 import pytest
 
+from tidehold.platform.errors import Invalid
+from tidehold.policy import versions
 from tidehold.policy.compile import CompileFailed, compile_policy, propose_event_set
 from tidehold.policy.prompt import compile_prompt
 from tidehold.policy.providers import Completion, Gemini, Groq, ProviderError
-from tidehold.policy.schema import WIRE_SCHEMA
-from tidehold.policy.spans import locate
+from tidehold.policy.schema import WIRE_SCHEMA, Rule, Ruling
+from tidehold.policy.spans import locate, locate_all
+from tidehold.policy.versions import Answer
 from tidehold.warnings.cap import OfficialWarning
 from tidehold.warnings.catalogue import GROUPS, event_value, values
 
@@ -356,3 +359,95 @@ async def test_groq_errors_keep_the_code_and_limit_but_not_the_message(
 
     assert raised.value.reason == reason
     assert raised.value.daily is daily
+
+
+def _ruling(topic: str, quote: str | None) -> Ruling:
+    return Ruling.model_validate({"topic": topic, "question": "How?", "quote": quote})
+
+
+def _checked(*asked: Ruling, rules: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """What publish stores for WORDING's rule (its 3.5% deduction) and the answered `asked`."""
+    parsed = [Rule.model_validate(r) for r in ([_rule(QUOTE)] if rules is None else rules)]
+    answers = [Answer(i, "No fee on card payments.") for i in range(len(asked))]
+    return versions.check(WORDING, parsed, asked, answers).rulings
+
+
+@pytest.mark.parametrize(
+    "ruling",
+    [
+        _ruling("deduction_conditional", None),
+        # on the rule's clause, but not on its deduction
+        _ruling("deduction_conditional", "you'll receive a full refund"),
+        _ruling("deduction_conditional", "Weather-related cancellations"),
+        _ruling("deduction_unspecified", None),
+        _ruling("deduction_unspecified", "Weather-related cancellations"),
+    ],
+)
+def test_a_deduction_ruling_off_its_rule_is_refused_on_publish(ruling: Ruling) -> None:
+    with pytest.raises(Invalid, match="DEDUCTION_RULING_OFF_RULE"):
+        _checked(ruling)
+
+
+def test_a_deduction_ruling_on_its_rule_is_stored_with_every_occurrence() -> None:
+    [conditional, unspecified] = _checked(
+        _ruling("deduction_conditional", FEE), _ruling("deduction_unspecified", "full refund")
+    )
+
+    assert [WORDING[a:b] for a, b in conditional["spans"]] == [FEE]
+    assert [WORDING[a:b] for a, b in unspecified["spans"]] == ["full refund"]
+
+
+def test_a_conditional_ruling_with_nothing_deducted_is_not_checked() -> None:
+    # The operator removed the deduction: the guest gets the full amount (ADR D3).
+    rule = _rule(QUOTE)
+    rule["remedies"][0]["deductions"] = []
+
+    [stored] = _checked(_ruling("deduction_conditional", None), rules=[rule])
+
+    assert stored["spans"] == []
+
+
+def test_a_span_not_found_item_covers_every_clause_and_deduction() -> None:
+    [stored] = _checked(_ruling("span_not_found", None))
+
+    assert [WORDING[a:b] for a, b in stored["spans"]] == [QUOTE.replace("'", RSQUO), FEE]
+
+
+def test_every_occurrence_is_located_overlapping_ones_and_folded_ones_included() -> None:
+    wording = f"aaa then you{RSQUO}ll pay, you'll pay"
+
+    assert [wording[s.start : s.end] for s in locate_all("aa", wording)] == ["aa", "aa"]
+    assert [wording[s.start : s.end] for s in locate_all("you'll pay", wording)] == [
+        f"you{RSQUO}ll pay",
+        "you'll pay",
+    ]
+    assert locate_all("", wording) == []
+
+
+async def test_a_deduction_ruling_off_every_rule_alone_is_retried_then_replaced() -> None:
+    off = {"topic": "deduction_conditional", "question": "Card fee?", "quote": None}
+    provider = Scripted(
+        [_answer(_rule(QUOTE), rulings=[off]), _answer(_rule(QUOTE), rulings=[off])]
+    )
+
+    compiled = await compile_policy(provider, WORDING, ["nws"])
+
+    assert len(compiled.rules) == 1
+    assert [r.ruling.topic for r in compiled.needs_ruling] == ["span_not_found"]
+    assert compiled.attempts == 2
+    assert "deduction_conditional: null" in provider.asked[1].split(">>>")[-1]
+
+
+async def test_a_deduction_ruling_placed_on_the_retry_is_kept() -> None:
+    off = {"topic": "deduction_conditional", "question": "Card fee?", "quote": None}
+    placed = {**off, "quote": FEE}
+    provider = Scripted(
+        [_answer(_rule(QUOTE), rulings=[off]), _answer(_rule(QUOTE), rulings=[placed])]
+    )
+
+    compiled = await compile_policy(provider, WORDING, ["nws"])
+
+    [ruling] = compiled.needs_ruling
+    assert (ruling.ruling.topic, ruling.ruling.quote) == ("deduction_conditional", FEE)
+    assert ruling.span is not None
+    assert WORDING[ruling.span.start : ruling.span.end] == FEE

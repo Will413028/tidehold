@@ -61,7 +61,14 @@ async def test_the_dev_fixtures_compile_to_their_labelled_rules_and_rulings(
     fixture: str, operator: AsyncClient, model: FakeModel
 ) -> None:
     wording = _wording(fixture)
-    model.answer(wording, _model_rules(fixture), LABELS[fixture]["needs_ruling"])
+    # A deduction ruling quotes the deduction it rules (Scuba Tribe's fee); the labels score
+    # topics only.
+    model.answer(
+        wording,
+        _model_rules(fixture),
+        LABELS[fixture]["needs_ruling"],
+        {"deduction_conditional": SCUBA_FEE},
+    )
 
     compiled = await _compile(operator, wording)
 
@@ -104,8 +111,8 @@ def settle_compiled(
     operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal, model: FakeModel
 ) -> Settle:
     async def settle(case: Case) -> dict[str, Any]:
-        """Compile `case`, check that publishing waits for the `deduction_conditional`
-        answer, answer every ruling, bind a trip with one paid deposit, and cancel all of it
+        """Compile `case`, check that publishing waits for the deduction rulings'
+        answers, answer every ruling, bind a trip with one paid deposit, and cancel all of it
         for weather; the settlement's proposal."""
         model.answer(case.wording, case.rules, case.topics, case.quotes)
         compiled = await _compile(operator, case.wording)
@@ -113,7 +120,7 @@ def settle_compiled(
         asked_only = [
             {"index": i, "answer": "As written."}
             for i, t in enumerate(case.topics)
-            if t != "deduction_conditional"
+            if not t.startswith("deduction_")
         ]
         answers = [
             {"index": i, "answer": "No fee on card payments."} for i in range(len(case.topics))
@@ -161,28 +168,29 @@ async def test_a_conditional_deduction_needs_its_ruling_before_publish_and_its_s
     assert (proposal["state"], proposal["reasons"]) == ("asked", ["REMEDY_CHOICE", "RULED_IN_TEXT"])
 
 
-async def test_without_a_quote_the_conditional_ruling_names_no_clause(
-    settle_compiled: Settle,
-) -> None:
-    # The control for the test above: the same answers, but the ruling quotes nothing, so
-    # RULED_IN_TEXT there comes from the stored spans, not from the ruling's topic.
-    proposal = await settle_compiled(_scuba_tribe(None))
-
-    assert (proposal["state"], proposal["reasons"]) == ("asked", ["REMEDY_CHOICE"])
-
-
 async def test_a_ruling_on_a_rules_fee_is_placed_in_that_rule_and_the_settlement_asks(
     settle_compiled: Settle,
 ) -> None:
     # One remedy, inside the mandate: without the ruling this settlement would be accepted.
     # The ruling's short quote occurs first in the "Fees:" passage; it is placed in the rule.
-    deduction = {
-        "kind": "percent",
-        "value": 3.5,
-        "label": "processing fee",
-        "quote": "minus 3.5% processing fee",
-    }
-    rule = {
+    rule = _one_fee_rule("minus 3.5% processing fee")
+    case = Case(
+        FEE_WORDING,
+        [rule],
+        ["deduction_conditional"],
+        {"deduction_conditional": "3.5% processing fee"},
+        None,
+    )
+
+    proposal = await settle_compiled(case)
+
+    assert (proposal["state"], proposal["reasons"]) == ("asked", ["RULED_IN_TEXT"])
+
+
+def _one_fee_rule(fee_quote: str) -> dict[str, Any]:
+    """FEE_WORDING's weather rule: one remedy, a 3.5% deduction quoted `fee_quote`."""
+    deduction = {"kind": "percent", "value": 3.5, "label": "processing fee", "quote": fee_quote}
+    return {
         **POLICY["rules"][0],
         "scope": "per_trip",
         "remedies": [
@@ -195,13 +203,94 @@ async def test_a_ruling_on_a_rules_fee_is_placed_in_that_rule_and_the_settlement
         ],
         "quote": "if we cancel the trip, you receive a full refund minus 3.5% processing fee.",
     }
-    case = Case(
-        FEE_WORDING,
-        [rule],
-        ["deduction_conditional"],
-        {"deduction_conditional": "3.5% processing fee"},
-        None,
-    )
+
+
+async def test_an_unquoted_conditional_ruling_is_replaced_by_one_covering_every_deduction(
+    settle_compiled: Settle, model: FakeModel
+) -> None:
+    # The model asks about the fee twice without quoting it: the compiler cannot tie the
+    # question to a rule, so it becomes a span_not_found item that covers every deduction, and
+    # the one-remedy rule (inside the mandate) still asks instead of deducting.
+    rule = _one_fee_rule("minus 3.5% processing fee")
+    case = Case(FEE_WORDING, [rule], ["deduction_conditional"], {}, None)
+
+    proposal = await settle_compiled(case)
+
+    assert model.calls == 2  # the answer and one retry naming the unplaced question
+    assert (proposal["state"], proposal["reasons"]) == ("asked", ["RULED_IN_TEXT"])
+
+
+async def test_an_unquoted_unspecified_deduction_ruling_makes_every_rule_ask(
+    settle_compiled: Settle,
+) -> None:
+    # No figure, so no Deduction: the replacement covers every rule's clause, and the
+    # one-remedy rule (inside the mandate) asks instead of refunding the full amount.
+    rule = _one_fee_rule("minus 3.5% processing fee")
+    rule["remedies"][0]["deductions"] = []
+    case = Case(FEE_WORDING, [rule], ["deduction_unspecified"], {}, None)
+
+    proposal = await settle_compiled(case)
+
+    assert (proposal["state"], proposal["reasons"]) == ("asked", ["RULED_IN_TEXT"])
+
+
+TWO_PRODUCTS = (
+    "Day trips:\nIf we cancel a day trip for weather, you receive a full refund minus 3.5% "
+    "processing fee for online payments.\nLiveaboards:\nIf we cancel a liveaboard for weather, "
+    "you receive a full refund minus 3.5% processing fee for online payments."
+)
+# The first occurrence of "full refund less fees" runs past the day trip rule's quote; the
+# second lies inside the liveaboard rule's.
+STRADDLE = (
+    "Day trips:\nIf we cancel a day trip you get a full refund less fees.\nLiveaboards:\n"
+    "If we cancel a liveaboard you get a full refund less fees."
+)
+
+
+def _product_rule(product: str, quote: str, deductions: list[dict[str, Any]]) -> dict[str, Any]:
+    remedy = {"kind": "refund", "percent": 100, "deductions": deductions}
+    return {
+        **POLICY["rules"][0],
+        "product": product,
+        "scope": "per_trip",
+        "remedies": [{**remedy, "credit_expiry_months": None}],
+        "quote": quote,
+    }
+
+
+def _fee(product: str) -> dict[str, Any]:
+    return {"kind": "percent", "value": 3.5, "label": f"{product} fee", "quote": SCUBA_FEE}
+
+
+@pytest.mark.parametrize("product", ["Day trips:", "Liveaboards:"])
+async def test_one_ruling_on_a_fee_sentence_two_products_share_asks_on_each(
+    product: str, settle_compiled: Settle
+) -> None:
+    day, liveaboard = TWO_PRODUCTS.split("\nLiveaboards:\n")
+    rules = [
+        _product_rule("Day trips:", day.removeprefix("Day trips:\n"), [_fee("day")]),
+        _product_rule("Liveaboards:", liveaboard, [_fee("liveaboard")]),
+    ]
+    quotes = {"deduction_conditional": SCUBA_FEE}
+    case = Case(TWO_PRODUCTS, rules, ["deduction_conditional"], quotes, product)
+
+    proposal = await settle_compiled(case)
+
+    assert (proposal["state"], proposal["reasons"]) == ("asked", ["RULED_IN_TEXT"])
+
+
+@pytest.mark.parametrize("product", ["Day trips:", "Liveaboards:"])
+async def test_a_ruling_quote_straddling_one_clause_and_inside_another_asks_on_both(
+    product: str, settle_compiled: Settle
+) -> None:
+    rules = [
+        _product_rule("Day trips:", "If we cancel a day trip you get a full refund", []),
+        _product_rule(
+            "Liveaboards:", "If we cancel a liveaboard you get a full refund less fees.", []
+        ),
+    ]
+    quotes = {"deduction_unspecified": "full refund less fees"}
+    case = Case(STRADDLE, rules, ["deduction_unspecified"], quotes, product)
 
     proposal = await settle_compiled(case)
 

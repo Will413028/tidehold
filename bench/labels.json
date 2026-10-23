@@ -1,5 +1,5 @@
 {
- "version": 2,
+ "version": 3,
  "fixtures": {
   "pure-dive": {
    "split": "dev",
@@ -74,9 +74,7 @@
    "split": "dev",
    "rules": [],
    "needs_ruling": [
-    "no_weather_clause",
-    "deduction_unspecified",
-    "deduction_conditional"
+    "no_weather_clause"
    ]
   },
   "scuba-tribe": {

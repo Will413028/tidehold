@@ -57,6 +57,26 @@ def locate(quote: str, wording: str) -> Span | None:
     return Span(origin[at], origin[last] + 1)
 
 
+def locate_all(quote: str, wording: str) -> list[Span]:
+    """Every occurrence of `quote` in `wording` (overlapping ones included), first to last: a
+    ruling's quote covers every clause it occurs in (step 5b)."""
+    needle, _ = _folded(quote)
+    needle = needle.strip()
+    if not needle:
+        return []
+    haystack, origin = _folded(wording)
+    found: list[Span] = []
+    at = haystack.find(needle)
+    while at >= 0:
+        found.append(Span(origin[at], origin[at + len(needle) - 1] + 1))
+        at = haystack.find(needle, at + 1)
+    return found
+
+
+def overlaps(a: Span, b: Span) -> bool:
+    return a.start < b.end and b.start < a.end
+
+
 def locate_within(quote: str, wording: str, within: Span) -> Span | None:
     """Where `quote` occurs inside the `within` part of `wording`, as offsets into `wording`;
     None when it does not occur there (a deduction is read inside its rule's clause)."""
