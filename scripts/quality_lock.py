@@ -93,7 +93,9 @@ def count_tests(reports: Path) -> dict[str, int]:
     return counts
 
 
-def compare(lock: dict, actual: dict) -> list[str]:
+def compare(lock: dict, actual: dict, not_run: frozenset[str] = frozenset()) -> list[str]:
+    """Differences between the lock and this run; suites named in `not_run` are left to the run
+    that executes them (pre-push leaves the browser tests to CI), and must have no report."""
     problems = []
     for kind in sorted(set(lock["suppressions"]) | set(actual["suppressions"])):
         want, got = lock["suppressions"].get(kind, 0), actual["suppressions"].get(kind, 0)
@@ -101,7 +103,9 @@ def compare(lock: dict, actual: dict) -> list[str]:
             problems.append(f"suppressions {kind}: {got} > locked {want}; remove the new ones")
         elif got < want:
             problems.append(f"suppressions {kind}: {got} < locked {want}; lower the lock to {got}")
-    for suite in sorted(set(lock["tests"]) | set(actual["tests"])):
+    for suite in sorted(not_run & set(actual["tests"])):
+        problems.append(f"tests {suite}: reported although named as not run")
+    for suite in sorted((set(lock["tests"]) | set(actual["tests"])) - not_run):
         want, got = lock["tests"].get(suite), actual["tests"].get(suite)
         if got is None:
             problems.append(f"tests {suite}: no report (locked {want}); did the suite run?")
@@ -159,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     check = sub.add_parser("check")
     check.add_argument("--reports", type=Path, required=True)
+    check.add_argument("--not-run", action="append", default=[], metavar="SUITE")
     sub.add_parser("history").add_argument("base")
     args = parser.parse_args(argv)
 
@@ -168,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
             "suppressions": count_suppressions(ROOT, tracked_files(ROOT)),
             "tests": count_tests(args.reports),
         }
-        problems = compare(lock, actual)
+        problems = compare(lock, actual, frozenset(args.not_run))
     else:
         problems = history(ROOT, args.base)
     for problem in problems:

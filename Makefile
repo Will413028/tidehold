@@ -1,6 +1,6 @@
-# `make check` is the gate: lefthook runs it (with `make security`) before every push,
-# and CI runs the same targets.
-.PHONY: check reports lint typecheck arch unit integration e2e locks coverage security dev-db dev-backend dev-web
+# `make check` is the full gate, run by CI. Before every push lefthook runs `make check-local`
+# (everything but the browser tests, which run only in CI) with `make security`.
+.PHONY: check check-local locks-local reports lint typecheck arch unit integration e2e locks coverage security dev-db dev-backend dev-web
 
 WEB := pnpm --dir web
 # Test reports read by `locks`; `check` starts from an empty directory so a suite that stops
@@ -10,6 +10,8 @@ REPORTS := $(CURDIR)/build/test-reports
 UNITTEST = python3 -m unittest -q $(1) 2> $(REPORTS)/$(2).txt; s=$$?; cat $(REPORTS)/$(2).txt >&2; exit $$s
 
 check: reports lint typecheck arch unit integration e2e locks
+
+check-local: reports lint typecheck arch unit integration locks-local
 
 reports:
 	rm -rf $(REPORTS) && mkdir -p $(REPORTS)
@@ -54,6 +56,9 @@ e2e:
 # Suppression comments may only go down and executed tests only up (quality-lock.json).
 locks:
 	python3 scripts/quality_lock.py check --reports $(REPORTS)
+
+locks-local:
+	python3 scripts/quality_lock.py check --reports $(REPORTS) --not-run web-e2e
 
 # Report only, no threshold: line and branch coverage of the money path, read at each step's acceptance.
 coverage:

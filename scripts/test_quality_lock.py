@@ -103,6 +103,10 @@ class CompareTest(unittest.TestCase):
             with self.subTest(actual=actual):
                 self.assertEqual(len(ql.compare(LOCKED, actual)), 1)
 
+    def test_a_suite_not_run_here_is_left_to_the_run_that_executes_it(self):
+        self.assertEqual(ql.compare(LOCKED, {**LOCKED, "tests": {}}, frozenset({"web"})), [])
+        self.assertEqual(len(ql.compare(LOCKED, LOCKED, frozenset({"web"}))), 1)
+
 
 class HistoryTest(unittest.TestCase):
     def commit(self, root: Path, lock: dict, message: str) -> None:

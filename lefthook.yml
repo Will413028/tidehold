@@ -1,10 +1,11 @@
-# Commits go straight to main, so pre-push is where a change is stopped; CI is the backup.
+# Commits go straight to main, so pre-push is where a change is stopped; CI is the backup, and
+# the only place the browser tests (`make e2e`) run.
 # Install once per clone: `lefthook install` (with a global core.hooksPath that dispatches to
 # .git/hooks: `GIT_CONFIG_GLOBAL=/dev/null lefthook install`).
 pre-push:
   commands:
     check:
-      run: make check
+      run: make check-local
     security:
       run: make security
     # A commit that loosens quality-lock.json must say why (Quality-lock-reason: line).
