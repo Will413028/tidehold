@@ -3,10 +3,12 @@
     cd backend && uv run --frozen python ../bench/run.py [--runs 2] [--models groq:<id>,...]
         [--split dev|held_out|all] [--out ../bench/results/<file>.json]
 
-Keys come from GROQ_API_KEY and GEMINI_API_KEY (`tidehold.platform.settings`; on the VM via
-`--env-file`, D13). Calls are sequential and spaced per provider so the fallback demo sharing
-the keys keeps its quota; a per-minute 429 or a 503 is counted, waited out once, then recorded as
-a failure; a spent daily quota fails the model's remaining calls without sending them. The
+Keys come from GROQ_API_KEY, GEMINI_API_KEY, and ANTHROPIC_API_KEY with ANTHROPIC_WORKSPACE_ID
+(`tidehold.platform.settings`; via `--env-file`, D13, D22). Calls are sequential and spaced per
+provider so the fallback demo sharing the keys keeps its quota; a per-minute 429 or an
+overloaded answer (503, 529) is counted, waited out once, then recorded as a failure; a spent
+daily quota (for Claude, the monthly spend cap) fails the model's remaining calls without
+sending them. The
 compile path is the product's own (`tidehold.policy`), so the prompt hash recorded here is the
 one step 5 ships.
 """
@@ -28,7 +30,7 @@ import score
 from tidehold.platform.settings import ModelKeys, model_keys_from_env
 from tidehold.policy.compile import CompileFailed, compile_policy, propose_event_set
 from tidehold.policy.prompt import PROMPT_HASH
-from tidehold.policy.providers import Gemini, Groq, Provider, ProviderError
+from tidehold.policy.providers import Claude, Gemini, Groq, Provider, ProviderError
 from tidehold.warnings.catalogue import GROUPS
 
 HERE = Path(__file__).parent
@@ -42,8 +44,9 @@ CANDIDATES = (
     "gemini:gemma-4-31b-it",
 )
 # Seconds between calls per provider: under the free tiers' per-minute limits with room left
-# for the fallback demo (Groq 30 requests/min, Gemini flash 10/min, read 2026-10-19).
-SPACING = {"groq": 4.0, "gemini": 10.0}
+# for the fallback demo (Groq 30 requests/min, Gemini flash 10/min, read 2026-10-19); Claude's
+# Start tier allows 1,000 requests/min per model and its key is not shared (read 2026-10-23).
+SPACING = {"groq": 4.0, "gemini": 10.0, "anthropic": 1.0}
 RATE_LIMIT_WAIT_S = 65.0
 # One call and, after a 429 or a 503, one more once the minute has passed.
 TRIES = 2
@@ -117,6 +120,10 @@ def _provider(spec: str, client: httpx.AsyncClient, keys: ModelKeys) -> Provider
         return Groq(client, keys.groq, model)
     if vendor == "gemini" and keys.gemini:
         return Gemini(client, keys.gemini, model)
+    # Not through `providers.build`: the benchmark measures Claude models the product does not
+    # run until a run is appended to model-benchmark.md (D22).
+    if vendor == "anthropic" and keys.anthropic:
+        return Claude(client, keys.anthropic, model, keys.anthropic_workspace)
     raise SystemExit(f"no key or unknown vendor for {spec}")
 
 

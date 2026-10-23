@@ -11,12 +11,12 @@
     "ts-ignore": 0
   },
   "tests": {
-    "backend-unit": 105,
+    "backend-unit": 121,
     "backend-integration": 189,
     "web": 22,
     "web-e2e": 12,
     "recorder": 9,
     "scripts": 9,
-    "bench": 5
+    "bench": 6
   }
 }

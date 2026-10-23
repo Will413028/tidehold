@@ -57,17 +57,22 @@ def paypal_from_env() -> PayPalCredentials:
 
 @dataclass(frozen=True)
 class ModelKeys:
-    """Provider keys for the policy compiler; either may be absent (D13: shared with the
-    fallback demo's key file, passed with `--env-file`, never read by an agent)."""
+    """Provider keys for the policy compiler; any may be absent (D13: shared with the fallback
+    demo's key file, passed with `--env-file`, never read by an agent)."""
 
     groq: str | None = field(default=None, repr=False)
     gemini: str | None = field(default=None, repr=False)
+    # Claude (D22): the developer's key, and the workspace it must name when it has one.
+    anthropic: str | None = field(default=None, repr=False)
+    anthropic_workspace: str | None = field(default=None, repr=False)
 
 
 def model_keys_from_env() -> ModelKeys:
     return ModelKeys(
         groq=os.environ.get("GROQ_API_KEY") or None,
         gemini=os.environ.get("GEMINI_API_KEY") or None,
+        anthropic=os.environ.get("ANTHROPIC_API_KEY") or None,
+        anthropic_workspace=os.environ.get("ANTHROPIC_WORKSPACE_ID") or None,
     )
 
 

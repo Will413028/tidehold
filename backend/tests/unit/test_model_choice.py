@@ -11,29 +11,52 @@ import pytest
 
 from tidehold.platform.settings import DEFAULT_COMPILE_MODEL, ModelKeys
 from tidehold.policy.prompt import PROMPT_HASH
-from tidehold.policy.providers import BENCHMARKED, MAX_OUTPUT_TOKENS, VENDORS, Groq, build
+from tidehold.policy.providers import (
+    BENCHMARKED,
+    CLAUDE_MAX_TOKENS,
+    MAX_OUTPUT_TOKENS,
+    VENDORS,
+    Groq,
+    build,
+)
 from tidehold.policy.schema import WIRE_SCHEMA
 
 BENCHMARK = (
     Path(__file__).resolve().parents[3]
     / "docs/plans/2026-10-19-tidehold-hackathon/model-benchmark.md"
 )
-# Per vendor: a successful reply, and where its request body carries the output-token cap.
-REPLIES: dict[str, tuple[dict[str, Any], tuple[str, ...]]] = {
+# Per vendor: a successful reply, where its request body carries the output-token cap, and
+# the cap (Claude's is higher: its adaptive thinking spends output tokens).
+REPLIES: dict[str, tuple[dict[str, Any], tuple[str, ...], int]] = {
     "groq": (
         {"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}]},
         ("max_completion_tokens",),
+        MAX_OUTPUT_TOKENS,
     ),
     "gemini": (
         {"candidates": [{"content": {"parts": [{"text": "{}"}]}, "finishReason": "STOP"}]},
         ("generationConfig", "maxOutputTokens"),
+        MAX_OUTPUT_TOKENS,
+    ),
+    "anthropic": (
+        {
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "model": "some-model",
+            "content": [{"type": "text", "text": "{}"}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        },
+        ("max_tokens",),
+        CLAUDE_MAX_TOKENS,
     ),
 }
 
 
 @pytest.mark.parametrize("vendor", sorted(VENDORS))
 async def test_every_provider_call_caps_its_output_tokens(vendor: str) -> None:
-    reply, path = REPLIES[vendor]  # a new vendor without an entry here fails
+    reply, path, cap = REPLIES[vendor]  # a new vendor without an entry here fails
     seen: list[httpx.Request] = []
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -46,7 +69,7 @@ async def test_every_provider_call_caps_its_output_tokens(vendor: str) -> None:
     body = json.loads(seen[0].content)
     for key in path:
         body = body[key]
-    assert body == MAX_OUTPUT_TOKENS
+    assert body == cap
 
 
 def test_the_configured_model_and_prompt_are_the_last_benchmarked() -> None:
@@ -64,6 +87,9 @@ def test_the_configured_model_and_prompt_are_the_last_benchmarked() -> None:
 async def test_only_a_benchmarked_model_id_is_built() -> None:
     with pytest.raises(ValueError, match="not one the benchmark measured"):
         build("groq:openai/gpt-oss", ModelKeys(groq="k"))
+    # Claude runs in the product only once the benchmark has measured it (D22).
+    with pytest.raises(ValueError, match="not one the benchmark measured"):
+        build("anthropic:claude-haiku-5-5", ModelKeys(anthropic="k"))
     assert build(DEFAULT_COMPILE_MODEL, ModelKeys()) is None
 
     provider = build(DEFAULT_COMPILE_MODEL, ModelKeys(groq="k"))

@@ -50,6 +50,25 @@ Fix round after the developer's local acceptance (2026-10-23, cloud container; e
 
 Prompt hash after the fix round: `00bdb5c3b65fa352`; after the first 5b commits it was `76c549dec3d3f42d` (was `9f7c6e9404b56080`). The Groq benchmark at the new prompt hash has not run (a human on the VM); until it is appended to `model-benchmark.md`, `test_the_configured_model_and_prompt_are_the_last_benchmarked` fails.
 
+## Step 5c: the Claude provider
+
+### Mutations (2026-10-23, cloud container)
+
+Each against `tests/unit/test_anthropic.py` and `tests/unit/test_model_choice.py`, reverted after; no real API call.
+
+| Mutation | Fails |
+|---|---|
+| Drop `max_retries=0` | `test_each_failure_is_a_provider_error_of_its_kind_sent_once` (the 429s, the 500, the 529, the timeout: more than one request) |
+| Treat a refusal as success | `test_each_failure_is_a_provider_error_of_its_kind_sent_once[…kind0]` |
+| The spend cap counts as a per-minute limit | `test_each_failure_is_a_provider_error_of_its_kind_sent_once[…kind3]` |
+| A billing error is not spent | `test_each_failure_is_a_provider_error_of_its_kind_sent_once[…kind7]` |
+| A non-JSON answer escapes | `test_each_failure_is_a_provider_error_of_its_kind_sent_once[…kind8]` |
+| Send the schema unconverted | `test_the_request_names_the_exact_model_its_format_and_effort_and_no_sampling` |
+| Drop the base URL pin | `test_no_environment_variable_points_the_sdk_elsewhere` |
+| Claude's output cap set to the others' | `test_the_request_names_the_exact_model_its_format_and_effort_and_no_sampling`, `test_every_provider_call_caps_its_output_tokens[anthropic]` |
+
+The Claude benchmark has not run (the developer's key, a human step).
+
 ## Step 7: official warnings and corroboration
 
 ### Recorded feeds read into the evidence store (2026-10-19 14:00 UTC)
