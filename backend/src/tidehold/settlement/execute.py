@@ -96,11 +96,7 @@ async def _send(
             # another run of this settlement stored it and sends it; this run waits for its
             # outcome (or for `reconcile_payment`, should that run stop before sending)
             stored = await _command(conn, payment_id, move["kind"], proposal["id"])
-            return (
-                "pending"
-                if stored is None or stored["status"] == "pending"
-                else str(stored["status"])
-            )
+            return "pending" if stored is None else _status(stored)
     if existing["status"] == "pending":
         try:
             # only the first send goes from here: a concurrent run of this settlement may be

@@ -105,3 +105,53 @@ async def test_each_kind_is_claimed_under_its_own_lease(conn: Conn) -> None:
 
     assert row is not None
     assert row["lease_until"] == T0 + timedelta(seconds=7)
+
+
+async def _failures(conn: Conn) -> list[tuple[str, int]]:
+    rows = await (await conn.execute("select state, failures from due_actions")).fetchall()
+    return [(r["state"], r["failures"]) for r in rows]
+
+
+async def test_waiting_is_not_a_failure_and_starts_the_failures_in_a_row_over(conn: Conn) -> None:
+    """MAX_ATTEMPTS - 1 failures, a wait, then one more failure: still pending, because the
+    wait reset the count; and the claims (`attempts`) went past MAX_ATTEMPTS without failing."""
+    await due.schedule(conn, "reconcile_payment", await _payment(conn), due_at=T0)
+    signals: list[Exception] = [
+        *(due.RetryLater("STILL_UNKNOWN") for _ in range(due.MAX_ATTEMPTS - 1)),
+        due.Waiting(timedelta(hours=1), "PENDING"),
+        due.RetryLater("STILL_UNKNOWN"),
+    ]
+
+    async def handler(_: Conn, __: due.Action, ___: datetime) -> None:
+        raise signals.pop(0)
+
+    now = T0
+    while signals:
+        assert await due.run_due(conn, {"reconcile_payment": handler}, now) == 1
+        now += timedelta(hours=2)
+
+    assert await _failures(conn) == [("pending", 1)]
+    assert await _state(conn) == [("pending", due.MAX_ATTEMPTS + 1)]
+
+
+async def test_a_lease_taken_over_counts_as_a_failure(conn: Conn) -> None:
+    await due.schedule(conn, "reconcile_payment", await _payment(conn), due_at=T0)
+    await due.claim(conn, T0)
+
+    taken = await due.claim(conn, T0 + due.LEASE + timedelta(seconds=1))
+
+    assert taken is not None
+    assert taken.failures == 1
+
+
+async def test_a_worker_that_lost_its_lease_cannot_make_the_action_wait(conn: Conn) -> None:
+    await due.schedule(conn, "reconcile_payment", await _payment(conn), due_at=T0)
+    stalled = await due.claim(conn, T0)
+    assert stalled is not None
+    later = T0 + due.LEASE + timedelta(seconds=1)
+    assert await due.claim(conn, later) is not None
+
+    waited = await due.wait(conn, stalled, later, due.Waiting(timedelta(hours=1), "PENDING"))
+
+    assert not waited
+    assert await _failures(conn) == [("running", 1)]

@@ -492,6 +492,22 @@ async def test_a_refund_read_that_keeps_failing_ends_failed(conn: Conn) -> None:
     assert (await _command(conn, command["id"]))["status"] == "unknown"
 
 
+async def test_a_refund_read_back_with_another_amount_is_not_waited_on(conn: Conn) -> None:
+    """Only PayPal's PENDING is waited on: a read that shows the refund done, but not as sent,
+    is an outcome we cannot record, so the action backs off and ends for the operator."""
+    fake = FakePayPal()
+    fake.refund_status = "PENDING"
+    payment_id = await _paid(conn, fake, "deposit")
+    command = await _refund(conn, payment_id, 1000)
+    await service.execute(conn, fake.client(), command["id"])
+    [refund] = fake.refunds.values()
+    refund.update(status="COMPLETED", amount={"currency_code": "USD", "value": "9.99"})
+
+    with pytest.raises(due.RetryLater):
+        await service.reconcile_due(conn, fake.client(), payment_id)
+    assert (await _command(conn, command["id"]))["status"] == "unknown"
+
+
 async def test_a_pending_refund_beside_an_unknown_one_still_backs_off(conn: Conn) -> None:
     fake = FakePayPal()
     fake.refund_status = "PENDING"

@@ -77,6 +77,11 @@ Each made the named test fail; the code was restored afterwards.
 | A refund refused when recorded (window, bound) is not caught by the settlement (local acceptance review) | `test_a_refund_refused_when_recorded_asks_and_the_other_guests_are_refunded` (the later guest got no refund) |
 | A refund PayPal reports PENDING backs off with `RetryLater` instead of waiting (local acceptance review) | `test_a_pending_refund_is_read_until_paypal_completes_it` (the settlement never ended) |
 | No window check before a refund's first send (local acceptance review) | `test_a_refund_whose_window_closes_before_its_first_send_is_not_sent[settlement]`, `[reconciliation]` |
+| A wait does not reset the failures in a row (closing review) | `test_waiting_is_not_a_failure_and_starts_the_failures_in_a_row_over` |
+| A lease taken over is not counted as a failure (closing review) | `test_a_lease_taken_over_counts_as_a_failure`, `test_a_worker_that_lost_its_lease_cannot_make_the_action_wait` |
+| `wait` without the lease's fencing token (closing review) | `test_a_worker_that_lost_its_lease_cannot_make_the_action_wait` |
+| `retry` counts claims instead of failures (closing review) | `test_waiting_is_not_a_failure_and_starts_the_failures_in_a_row_over` |
+| Any read result counts as pending (closing review) | `test_a_refund_read_back_with_another_amount_is_not_waited_on` |
 
 ### Coverage of the money path (2026-10-19, report only)
 

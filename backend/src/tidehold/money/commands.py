@@ -295,8 +295,20 @@ async def record_refused_refund(
 ) -> DictRow:
     """Store a settlement's refund that was refused before PayPal (`REFUSED_BEFORE_PAYPAL`):
     closed at once, never sent, so a rerun does not try it again and the operator is asked
-    with the reason (plan step 8b)."""
-    current = await payment(conn, payment_id)
+    with the reason (plan step 8b). Under the payment's lock, a refund of this settlement that
+    another run already stored (live, or refused the same way) is returned instead, so two
+    runs never store two refusals for one guest."""
+    current = await payment(conn, payment_id, lock=True)
+    stored = await (
+        await conn.execute(
+            "select * from money_commands where proposal_id = %s and payment_id = %s"
+            " and kind = 'refund' and (status <> 'rejected' or sent_at is null)"
+            " order by created_at desc limit 1",
+            (proposal_id, payment_id),
+        )
+    ).fetchone()
+    if stored is not None:
+        return stored
     command_id = uuid4()
     row = await insert_returning(
         conn,
