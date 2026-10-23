@@ -29,7 +29,8 @@ from tidehold.trips import store as trips
 async def _command(conn: Conn, payment_id: UUID, kind: str, proposal_id: UUID) -> DictRow | None:
     row: DictRow | None = await (
         await conn.execute(
-            "select id, status, sent_at, error_code, result, amount_minor from money_commands"
+            "select id, status, sent_at, error_code, result, amount_minor, read_at"
+            " from money_commands"
             " where payment_id = %s and kind = %s"
             " and proposal_id = %s order by created_at desc limit 1",
             (payment_id, kind, proposal_id),
@@ -111,21 +112,27 @@ async def _send(
     return _status(existing)
 
 
-async def _being_read(conn: Conn, payment_id: UUID) -> bool:
-    """Whether a `reconcile_payment` reads the payment's open command, scheduling one when the
-    last ended (its wake can be dropped while it runs); False once the reads gave up (failed),
-    which the operator console shows."""
+async def _being_read(conn: Conn, payment_id: UUID, command: DictRow) -> bool:
+    """Whether a `reconcile_payment` reads this open command, scheduling one when the last
+    ended without giving up on it (its wake can be dropped while it runs); False once a failed
+    one had read it (the reads gave up), which the operator console shows."""
     last = await (
         await conn.execute(
-            "select state from due_actions where kind = 'reconcile_payment' and payment_id = %s"
-            " order by id desc limit 1",
+            "select state, created_at from due_actions where kind = 'reconcile_payment'"
+            " and payment_id = %s order by id desc limit 1",
             (payment_id,),
         )
     ).fetchone()
-    if last is not None and last["state"] == "failed":
+    if last is not None and last["state"] in ("pending", "running"):
+        return True
+    if (
+        last is not None
+        and last["state"] == "failed"
+        and command["read_at"] is not None
+        and command["read_at"] >= last["created_at"]
+    ):
         return False
-    if last is None or last["state"] == "done":
-        await due.schedule(conn, "reconcile_payment", payment_id, due_at=None)
+    await due.schedule(conn, "reconcile_payment", payment_id, due_at=None)
     return True
 
 
@@ -234,7 +241,10 @@ async def settle(conn: Conn, client: PayPalClient | None, proposal_id: UUID, now
             if status in ("rejected", "refused"):
                 await _refused(conn, proposal, guest, (payment_id, move))
             if status in ("unknown", "processing"):
-                unread = not await _being_read(conn, payment_id) or unread
+                command = await _command(conn, payment_id, move["kind"], proposal["id"])
+                unread = (
+                    command is None or not await _being_read(conn, payment_id, command) or unread
+                )
     if not _final(statuses, unread=unread):
         return  # a refusal before PayPal keeps the settlement accepted, for the operator (8b)
     await conn.execute(

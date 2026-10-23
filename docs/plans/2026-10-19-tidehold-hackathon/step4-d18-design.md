@@ -176,3 +176,14 @@ An independent reviewer read the design above against the code, read-only, befor
 | 5 | A first send by reconciliation of a command another run already completed costs a spurious failure | LOW | Changed: on `MONEY_COMMAND_ALREADY_SENT` reconciliation reports the command's own status when it is no longer open, `unknown` only while it is (no dedicated test: it needs the other send to complete inside the window between reconcile's read and its claim) |
 | 6 | The same send-without-a-read race between `complete_checkout` and reconciliation | LOW | Recorded in the plan's Deferred with its trigger (step 4's last round fixes only correctness HIGH/MED beyond the three named) |
 | 7 | While a settlement waits, the late-payment sweep skips it; a completed refund leaves the proposal `accepted` up to an hour; the threat model's row should name the new tests | LOW | Recorded here (both delays are bounded by `PENDING_REFUND_READ_EVERY`), and the threat model's "runs twice" row now names the fix's tests |
+
+### Closing review of the second review's fixes (2026-10-23)
+
+An independent reviewer read commit `a5917ce` and found 4 issues (no HIGH). Dispositions:
+
+| # | Finding | Severity | Disposition |
+|---|---|---|---|
+| 1 | "The reads gave up" was decided per payment: a refund sent during the last run of a `reconcile_payment` that then failed for another command (a held one) had its wake dropped and was never read, and the settlement failed on it | MED | Fixed: `money_commands.read_at` (migration 0014) is stamped whenever reconciliation reads a sent command (or tries to); `_being_read` returns False only when the payment's latest `reconcile_payment` failed and had read this command (`read_at >= created_at`), otherwise it schedules a fresh read. Test `test_a_settlement_reads_a_refund_whose_read_was_dropped[failed]` |
+| 2 | `_being_read` survived "oldest row instead of latest" and "never schedule when none exists" | LOW | Fixed for the ordering: `test_an_older_failed_read_does_not_stop_a_settlement_whose_refund_is_read`. Since the fix above, `_being_read` has one scheduling branch for every case but an open or a given-up read, so the removed-branch mutation is the "never schedules" one, which fails `test_a_settlement_reads_a_refund_whose_read_was_dropped` |
+| 3 | A refund that stays PENDING for good is read hourly forever and never reaches the console | LOW | Put to the developer with the open question on the deferred webhook's trigger (a bound such as N days after `sent_at` is a plan decision) |
+| 4 | `_sent_since` counted a refund another run sent and PayPal reports PENDING as `unknown` (one counted failure) | LOW | Fixed: it reports `pending` (no dedicated test: the same narrow interleaving as finding 5 of the design review) |

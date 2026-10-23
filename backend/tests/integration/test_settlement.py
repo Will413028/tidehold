@@ -1420,11 +1420,13 @@ async def test_a_settlement_waiting_on_a_pending_refund_asks_when_paypal_fails_i
     assert await _settle_actions(conn) == ["done"]
 
 
+@pytest.mark.parametrize("ended", ["done", "failed"])
 async def test_a_settlement_reads_a_refund_whose_read_was_dropped(
-    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal, ended: str
 ) -> None:
     """The refund's answer is lost while the deposit's `reconcile_payment` is running, so the
-    send's wake is dropped and that run ends without it: the settlement has it read, and ends."""
+    send's wake is dropped and that run ends without reading it (`failed`: for another command
+    of the payment): the settlement has it read, and ends."""
     trip = await _trip(operator, [WHOLE_TRIP_RULE])
     await _guest(operator, client, conn, paypal, trip["id"])
     proposal = await _cancel(operator, trip["id"], "rest", 1)
@@ -1440,9 +1442,9 @@ async def test_a_settlement_reads_a_refund_whose_read_was_dropped(
     with pytest.raises(due.RetryLater):
         await execute.settle(conn, paypal.client(), UUID(proposal["id"]), _now())
     await conn.execute(
-        "update due_actions set state = 'done', lease_until = null, finished_at = now()"
+        "update due_actions set state = %s, lease_until = null, finished_at = now()"
         " where payment_id = %s",
-        (deposit,),
+        (ended, deposit),
     )
     now = _now()
     for _ in range(due.MAX_ATTEMPTS):
@@ -1479,3 +1481,33 @@ async def test_a_settlement_whose_pending_refund_is_no_longer_read_fails(
     ).fetchall()
     assert [r["kind"] for r in failed] == ["reconcile_payment", "settle_proposal"]
     assert paypal.posts("/refund") == 1
+
+
+async def test_an_older_failed_read_does_not_stop_a_settlement_whose_refund_is_read(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+) -> None:
+    """An earlier `reconcile_payment` of the deposit failed; the refund PayPal now processes is
+    read by a newer one, so the settlement waits on that read instead of failing."""
+    trip = await _trip(operator, [WHOLE_TRIP_RULE])
+    await _guest(operator, client, conn, paypal, trip["id"])
+    proposal = await _cancel(operator, trip["id"], "rest", 1)
+    deposit = await _deposit_id(conn, trip["id"])
+    await due.schedule(conn, "reconcile_payment", deposit, due_at=_now())
+    await conn.execute(
+        "update due_actions set state = 'failed', finished_at = now() where payment_id = %s",
+        (deposit,),
+    )
+    paypal.refund_status = "PENDING"
+
+    with pytest.raises(due.Waiting):
+        await execute.settle(conn, paypal.client(), UUID(proposal["id"]), _now())
+    assert await service.reconcile(conn, paypal.client(), deposit) != {}  # the newer one reads it
+    with pytest.raises(due.Waiting):
+        await execute.settle(conn, paypal.client(), UUID(proposal["id"]), _now())
+
+    states = await (
+        await conn.execute(
+            "select state from due_actions where payment_id = %s order by id", (deposit,)
+        )
+    ).fetchall()
+    assert [r["state"] for r in states] == ["failed", "pending"]

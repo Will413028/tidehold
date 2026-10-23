@@ -337,6 +337,8 @@ async def reconcile(
         if command is None:
             continue
         read, result = await _read(client, command, payment)
+        if command["sent_at"] is not None:
+            await commands.mark_read(conn, command_id)
         try:
             outcomes[command_id] = await (
                 # a command never sent is sent as its first send: if someone sent it since this
@@ -357,12 +359,16 @@ async def reconcile(
 
 async def _sent_since(conn: Conn, command_id: UUID) -> str:
     """A command someone else sent while reconciliation was about to: its outcome if it has
-    one, else `unknown`, so the action runs again and reads PayPal first."""
+    one, `pending` if PayPal is processing it, else `unknown`, so the action runs again and
+    reads PayPal first."""
     row = await (
-        await conn.execute("select status from money_commands where id = %s", (command_id,))
+        await conn.execute("select status, result from money_commands where id = %s", (command_id,))
     ).fetchone()
-    status = "unknown" if row is None else str(row["status"])
-    return "unknown" if status == "pending" else status
+    if row is None or row["status"] == "pending":
+        return "unknown"
+    if row["status"] == "unknown" and (row["result"] or {}).get("status") == "PENDING":
+        return "pending"  # PayPal is processing it: waiting, not a failure
+    return str(row["status"])
 
 
 async def reconcile_due(conn: Conn, client: PayPalClient, payment_id: UUID) -> None:

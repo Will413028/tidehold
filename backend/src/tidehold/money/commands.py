@@ -394,6 +394,11 @@ async def mark_resend_refused(conn: Conn, command_id: UUID) -> None:
     )
 
 
+async def mark_read(conn: Conn, command_id: UUID) -> None:
+    """Reconciliation read PayPal's record of this sent command (or tried to)."""
+    await conn.execute("update money_commands set read_at = now() where id = %s", (command_id,))
+
+
 async def open_commands(conn: Conn, payment_id: UUID) -> list[UUID]:
     rows = await (
         await conn.execute(

@@ -87,6 +87,9 @@ Each made the named test fail; the code was restored afterwards.
 | Reconciliation claims a never-sent command without `first_send` (second independent review) | `test_reconciliation_leaves_a_refund_a_settlement_just_sent_to_a_read` (2 refund POSTs instead of 1) |
 | A settlement does not schedule a read when the last one ended (its design review) | `test_a_settlement_reads_a_refund_whose_read_was_dropped` (the settlement stayed `accepted`) |
 | A settlement keeps waiting after the refund's reads gave up (its design review) | `test_a_settlement_whose_pending_refund_is_no_longer_read_fails` (the settlement waited on a refund nobody reads) |
+| "The reads gave up" decided per payment, not per command (`read_at` ignored; its closing review) | `test_a_settlement_reads_a_refund_whose_read_was_dropped[failed]` (the settlement stayed `accepted`) |
+| The settlement looks at the oldest `reconcile_payment` of the payment, not the latest (its closing review) | `test_an_older_failed_read_does_not_stop_a_settlement_whose_refund_is_read` (`RetryLater: PAYPAL_REFUND_NOT_READ`) |
+| Reconciliation does not stamp `read_at` (its closing review) | `test_a_settlement_whose_pending_refund_is_no_longer_read_fails` (the settlement waited on a refund nobody reads) |
 
 ### Coverage of the money path (2026-10-19, report only)
 
