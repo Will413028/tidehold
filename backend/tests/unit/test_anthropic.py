@@ -107,8 +107,15 @@ async def test_the_answer_goes_through_the_schema_validation() -> None:
     ) as client:
         provider = Claude(client, "k", "claude-haiku-5-5")
         # A percent over 100 is still refused: the conversion loosens nothing.
-        with pytest.raises(CompileFailed):
+        with pytest.raises(CompileFailed, match="percent"):
             await compile_policy(provider, WORDING, ["nws"])
+    rule["remedies"][0]["percent"] = 100
+    valid = json.dumps({"rules": [rule], "needs_ruling": []})
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=_message(valid)))
+    ) as client:
+        compiled = await compile_policy(Claude(client, "k", "claude-haiku-5-5"), WORDING, ["nws"])
+    assert [r.rule.remedies[0].percent for r in compiled.rules] == [100]
 
 
 def _status(
@@ -162,6 +169,10 @@ Kind = tuple[str, int | None, bool, bool]
         (_status(500, "api_error"), ("HTTP 500 api_error", 500, False, False)),
         (_status(529, "overloaded_error"), ("HTTP 529 overloaded_error", 529, True, False)),
         (_timeout, ("APITimeoutError", None, False, False)),
+        (
+            lambda _: httpx.Response(200, json=_message() | {"content": None}),
+            ("no text in the answer", None, False, False),
+        ),
         # credit or payment trouble: spent until a person fixes the account
         (_status(402, "billing_error"), ("HTTP 402 billing_error", 402, False, True)),
         (

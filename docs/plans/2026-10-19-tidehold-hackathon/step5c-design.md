@@ -43,7 +43,7 @@ Plan step 5c and D22 (`../2026-10-19-tidehold-hackathon.md`). Written 2026-10-23
 - the request names the exact model, carries `output_config.format` (the converted schema, no `minimum`) and `effort: medium`, no `temperature`/`top_p`/`top_k`/`thinking`, `max_tokens` 16000, and `anthropic-workspace-id` only when a workspace is set;
 - a JSON answer is returned as text and goes through `compile_policy`'s schema validation (a percent of 150 is still `CompileFailed`);
 - `refusal` (with category), `max_tokens`, a per-minute 429 (names the limit, transient, not daily), the spend-cap 429 (daily, not transient), a 500, a 529 (transient) and a timeout each become `ProviderError` with that classification; one request is sent per call (`max_retries=0`);
-- `build("anthropic:claude-haiku-5-5", ModelKeys(anthropic="k"))` raises; bench `_provider` returns an `Anthropic`;
+- `build("anthropic:claude-haiku-5-5", ModelKeys(anthropic="k"))` raises; bench `_provider` returns a `Claude`;
 - `test_every_provider_call_caps_its_output_tokens` covers the new vendor with its own cap.
 - the request goes to `api.anthropic.com` with the given key while `ANTHROPIC_BASE_URL` and `ANTHROPIC_API_KEY` are set; neither the key nor the workspace is in the provider's `repr`; every schema sent (`WIRE_SCHEMA`, `EVENT_SET_SCHEMA`, drafts' `SCHEMA`) keeps only accepted keywords; an event set is proposed through Claude; a 402 `billing_error` is spent and a non-JSON body is a `ProviderError`.
 - Mutations: drop `max_retries=0`; treat a refusal as success; the spend cap as a per-minute limit; send the schema unconverted; drop the base URL pin; a billing error not spent; let a non-JSON answer escape; Claude's cap set to the others'. Each fails a test (`docs/evidence.md`).
@@ -67,9 +67,20 @@ An independent reviewer read this design against the plan, the code and the inst
 | 7 | `propose_event_set` is a consumer too | MED | Named; tested through Claude |
 | 8 | The token-cap test needs a per-vendor cap and a valid message body | MED | Done; mutation: Claude's cap set to the others' |
 | 9 | The human step's command lacks `--out`; `CANDIDATES` | LOW | Fixed; `CANDIDATES` unchanged, the specs are named |
-| 10 | 529 constant, `billing_error`, the spend-cap body shape | LOW | 529 is a literal; developer chose `billing_error` as spent; the body shape is cited from the rate-limits page, and without `error_code` a 429 is per-minute (transient) |
+| 10 | 529 constant, `billing_error`, the spend-cap body shape | LOW | 529 is a named constant (`OVERLOADED`); developer chose `billing_error` as spent; the body shape is cited from the rate-limits page, and without `error_code` a 429 is per-minute (transient) |
 | 11 | Secrets in errors via `__cause__` | LOW | Reasons carry no message text; nothing logs tracebacks of provider errors (checked: `service.run` stores only `_error_code`) |
 | 12 | Workspace header with a plain key and the 1,000 RPM figure are unverified offline | LOW | The benchmark run confirms the header; spacing stays 1 s (ITPM may bind first; a 429 is waited out once) |
 | 13 | `Anthropic` shadows the SDK's class | LOW | Renamed `Claude` |
 
 ## Review before commit
+
+An independent reviewer read the implementation on 2026-10-23. 0 HIGH, 1 MED, 4 LOW:
+
+| # | Finding | Severity | Outcome |
+|---|---|---|---|
+| 1 | `quality-lock.json` counts not raised | MED | Already raised before the commit (unit 121, bench 6; the reviewer read an earlier tree) |
+| 2 | The schema conversion runs inside the `try`, so a fault in our schema would read as a provider error | LOW | Fixed: converted before the call |
+| 3 | A 200 without `content` escapes `ProviderError` | LOW | Fixed: an answer without text is `ProviderError("no text in the answer")`; tested |
+| 4 | The design names `Anthropic` and calls 529 a literal | LOW | Fixed |
+| 5 | The validation test has no positive control | LOW | Fixed: the error names `percent`, and the same answer at 100 compiles |
+

@@ -246,6 +246,8 @@ class Claude:
         self, system: str, user: str, schema: dict[str, Any], name: str
     ) -> Completion:
         del name  # Claude takes the schema unnamed
+        # Converted outside the `try`: a fault in our own schema is not a provider error.
+        converted = claude_schema(schema)
         sdk = anthropic.AsyncAnthropic(
             api_key=self.key,
             base_url=CLAUDE_URL,
@@ -266,7 +268,7 @@ class Claude:
                 system=system,
                 messages=[{"role": "user", "content": user}],
                 output_config={
-                    "format": {"type": "json_schema", "schema": claude_schema(schema)},
+                    "format": {"type": "json_schema", "schema": converted},
                     "effort": "medium",
                 },
             )
@@ -278,7 +280,11 @@ class Claude:
             raise ProviderError(f"refusal {category or 'none'}")
         if message.stop_reason != "end_turn":
             raise ProviderError(f"stop_reason {message.stop_reason}")
-        text = "".join(block.text for block in message.content if block.type == "text")
+        # The SDK does not check a response's shape: a 200 without content is a provider error.
+        blocks = message.content or []
+        text = "".join(b.text for b in blocks if isinstance(b, anthropic.types.TextBlock))
+        if not text:
+            raise ProviderError("no text in the answer")
         return Completion(text, latency)
 
 

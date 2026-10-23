@@ -59,10 +59,11 @@ Each against `tests/unit/test_anthropic.py` and `tests/unit/test_model_choice.py
 | Mutation | Fails |
 |---|---|
 | Drop `max_retries=0` | `test_each_failure_is_a_provider_error_of_its_kind_sent_once` (the 429s, the 500, the 529, the timeout: more than one request) |
-| Treat a refusal as success | `test_each_failure_is_a_provider_error_of_its_kind_sent_once[…kind0]` |
-| The spend cap counts as a per-minute limit | `test_each_failure_is_a_provider_error_of_its_kind_sent_once[…kind3]` |
-| A billing error is not spent | `test_each_failure_is_a_provider_error_of_its_kind_sent_once[…kind7]` |
-| A non-JSON answer escapes | `test_each_failure_is_a_provider_error_of_its_kind_sent_once[…kind8]` |
+| Treat a refusal as success | `test_each_failure_is_a_provider_error_of_its_kind_sent_once` (the refusal case) |
+| The spend cap counts as a per-minute limit | `test_each_failure_is_a_provider_error_of_its_kind_sent_once` (the spend-cap case) |
+| A billing error is not spent | `test_each_failure_is_a_provider_error_of_its_kind_sent_once` (the 402 case) |
+| A non-JSON answer escapes | `test_each_failure_is_a_provider_error_of_its_kind_sent_once` (the non-JSON case) |
+| An answer without text is a success (closing review) | `test_each_failure_is_a_provider_error_of_its_kind_sent_once` (the no-content case) |
 | Send the schema unconverted | `test_the_request_names_the_exact_model_its_format_and_effort_and_no_sampling` |
 | Drop the base URL pin | `test_no_environment_variable_points_the_sdk_elsewhere` |
 | Claude's output cap set to the others' | `test_the_request_names_the_exact_model_its_format_and_effort_and_no_sampling`, `test_every_provider_call_caps_its_output_tokens[anthropic]` |
