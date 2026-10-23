@@ -161,9 +161,12 @@ async def reauth_authorize(client: PayPalClient, path: Path) -> dict[str, Any]:
 async def _step(
     state: dict[str, Any], path: Path, step: str, call: Callable[[str], Awaitable[Any]]
 ) -> Any:
-    """Run one day-4 step once, keyed by name; record PayPal's answer either way."""
+    """Run one day-4 step until PayPal answers, keyed by name; record every attempt.
+
+    An `unknown` answer is resent under the same request id on the next run, so a
+    timeout neither repeats the move nor ends the check without a result."""
     results: list[dict[str, Any]] = state.setdefault("day4", [])
-    if any(r["step"] == step for r in results):
+    if any(r["step"] == step and r["result"] != "unknown" for r in results):
         return None
     record: dict[str, Any] = {"step": step, "at": _now()}
     result = None

@@ -40,3 +40,29 @@ async def test_the_reauthorization_check_keeps_its_state_between_days(tmp_path: 
     renewed = saved["card_reauthorize"]["reauthorized_id"]
     assert renewed != saved["card_reauthorize"]["authorization_id"]
     assert f"POST /v2/payments/authorizations/{renewed}/capture" in fake.calls
+
+
+async def test_a_day4_step_left_unknown_is_resent_under_its_request_id(tmp_path: Path) -> None:
+    fake = FakePayPal()
+    state = tmp_path / "reauth.json"
+    await sandbox.reauth_create(fake.client(), state)
+    fake.time_out_first = {"reauthorize"}
+
+    await sandbox.reauth_day4(fake.client(), state)
+    first = json.loads(state.read_text())
+    assert ("card_reauthorize-reauthorize", "unknown") in [
+        (r["step"], r["result"]) for r in first["day4"]
+    ]
+    assert "reauthorized_id" not in first["card_reauthorize"]
+
+    await sandbox.reauth_day4(fake.client(), state)
+    saved = json.loads(state.read_text())
+    assert saved["request_ids"].items() >= first["request_ids"].items()
+    assert [(r["step"], r["result"]) for r in saved["day4"] if r["step"].startswith("card_")] == [
+        ("card_reauthorize-reauthorize", "unknown"),
+        ("card_capture_only-capture", "accepted"),
+        ("card_reauthorize-reauthorize", "accepted"),
+        ("card_reauthorize-capture", "accepted"),
+    ]
+    original = saved["card_reauthorize"]["authorization_id"]
+    assert fake.calls.count(f"POST /v2/payments/authorizations/{original}/reauthorize") == 2
