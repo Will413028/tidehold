@@ -126,3 +126,13 @@ async def test_reads_show_an_orders_refunds_by_invoice_id_and_a_refunds_status()
     pending = {"id": "R1", "status": "PENDING", "amount": usd(1500), "invoice_id": "tidehold-a"}
     refund = await _client(httpx.Response(200, json=pending), seen).get_refund("R1")
     assert (refund.status, seen[-1].url.path) == ("PENDING", "/v2/payments/refunds/R1")
+
+
+async def test_a_capture_is_read_by_its_id() -> None:
+    seen: list[httpx.Request] = []
+    answer = httpx.Response(200, json={"id": "C1", "status": "PENDING", "amount": usd(3000)})
+
+    capture = await _client(answer, seen).get_capture("C1")
+
+    assert (capture.capture_id, capture.status, capture.amount_minor) == ("C1", "PENDING", 3000)
+    assert (seen[-1].method, seen[-1].url.path) == ("GET", "/v2/payments/captures/C1")

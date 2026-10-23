@@ -9,7 +9,6 @@ of moving money again. Who calls `reconcile` and when: the due action of plan st
 nightly job of step 10.
 """
 
-from collections.abc import Sequence
 from typing import Any, Literal
 from uuid import UUID
 
@@ -22,6 +21,7 @@ from tidehold.money.paypal import (
     PayPalError,
     PayPalUnexpectedResponse,
     PayPalUnknownOutcome,
+    Refund,
     SandboxCard,
     authorization_of,
     capture_of,
@@ -142,10 +142,15 @@ async def send(
 
 
 async def execute(
-    conn: Conn, client: PayPalClient, command_id: UUID, card: SandboxCard | None = None
+    conn: Conn,
+    client: PayPalClient,
+    command_id: UUID,
+    card: SandboxCard | None = None,
+    *,
+    first_send: bool = False,
 ) -> Outcome:
     async with conn.transaction():
-        command = await commands.claim(conn, command_id)
+        command = await commands.claim(conn, command_id, first_send=first_send)
         if command["method"] == "test_card" and card is None:
             raise Conflict("PAYMENT_CARD_REQUIRED")  # rolls the claim back
         payment = await commands.payment(conn, command["payment_id"])
@@ -157,7 +162,7 @@ async def execute(
                 conn,
                 command_id,
                 "unknown",
-                result=getattr(error, "result", None),
+                result=error.result if isinstance(error, OutcomePending) else None,
                 error_code=error.code,
             )
             await due.schedule(conn, "reconcile_payment", payment["id"], due_at=None)
@@ -198,8 +203,9 @@ async def _read_open(
     try:
         order = await client.get_order(order_id)
     except PayPalError as error:
-        # an order PayPal no longer knows placed nothing (orders expire unpaid)
-        return ("rejected", None) if error.status == 404 else ("undecided", None)
+        # an order PayPal does not show is not proof that nothing was captured: resend under
+        # the key (plan step 4), and a refusal of that resend marks it for the operator
+        return ("resend", None) if error.status == 404 else ("undecided", None)
     try:
         return "succeeded", _placed_by(order, command, capture=payment["intent"] == "capture")
     except OutcomePending:
@@ -216,11 +222,13 @@ def _not_placed(order: dict[str, Any], command: DictRow) -> Read:
     if status == "APPROVED" and command["method"] == "checkout":
         return "resend"  # the buyer approved; our capture or authorize never landed
     if status in ("CREATED", "PAYER_ACTION_REQUIRED", "VOIDED"):
-        return "rejected"  # nothing placed, and nothing will be without the buyer
+        # nothing placed, and nothing will be without the buyer: closing it lets the guest
+        # start a new attempt (a resend would only be refused and keep the attempt open)
+        return "rejected"
     return "undecided"
 
 
-def _matching(refund: Any, command: DictRow) -> tuple[Read, dict[str, Any]]:
+def _matching(refund: Refund, command: DictRow) -> tuple[Read, dict[str, Any]]:
     result = {"refundId": refund.refund_id, "status": refund.status}
     read = REFUND_SETTLED.get(refund.status, "undecided")
     if read == "succeeded" and refund.amount_minor != command["amount_minor"]:
@@ -237,7 +245,7 @@ async def _read_refund(
             return _matching(await client.get_refund(refund_id), command)
         if payment["order_id"] is None:
             return "resend", None
-        refunds: Sequence[Any] = refunds_of(await client.get_order(payment["order_id"]))
+        refunds = refunds_of(await client.get_order(payment["order_id"]))
     except (PayPalError, PayPalUnknownOutcome):
         return "undecided", None  # a read that failed proves nothing either way
     found = [r for r in refunds if r.invoice_id == command["invoice_id"]]
@@ -260,7 +268,7 @@ async def _read(
             case "refund" if unknown:
                 read, result = await _read_refund(client, command, payment)
             case _:
-                return "resend", None
+                read, result = "resend", None
     except PayPalUnknownOutcome:
         return "undecided", None
     if read == "resend" and command["resend_refused_at"] is not None:
@@ -274,12 +282,16 @@ async def _settle_from_read(
     async with conn.transaction():
         if read in ("succeeded", "rejected"):
             status: commands.Status = "succeeded" if read == "succeeded" else "rejected"
+            # a refusal keeps what PayPal said (a refund's FAILED or CANCELLED) for the ask
+            reason = (
+                f"PAYPAL_{command['kind'].upper()}_{(result or {}).get('status', 'NOT_PLACED')}"
+            )
             await commands.complete(
                 conn,
                 command["id"],
                 status,
                 result=result,
-                error_code=None if read == "succeeded" else "PAYPAL_READ_NOT_PLACED",
+                error_code=None if read == "succeeded" else reason,
             )
             if command["proposal_id"] is not None:
                 # the settlement that sent it may have given up waiting; it finds this command
@@ -308,12 +320,13 @@ async def reconcile(
         if command is None:
             continue
         read, result = await _read(client, command, payment)
-        if read != "resend":
-            outcomes[command_id] = await _settle_from_read(conn, command, read, result)
-            continue
         try:
-            outcomes[command_id] = await execute(conn, client, command_id, card)
-        except DomainError as error:
+            outcomes[command_id] = await (
+                execute(conn, client, command_id, card)
+                if read == "resend"
+                else _settle_from_read(conn, command, read, result)
+            )
+        except DomainError as error:  # completed meanwhile, or not sendable: the others go on
             outcomes[command_id] = error.code
     return outcomes
 

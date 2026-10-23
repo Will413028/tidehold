@@ -298,6 +298,29 @@ async def test_a_refused_resend_keeps_the_command_open_and_its_key(conn: Conn) -
         await _refund(conn, payment_id, 25001)
 
 
+async def test_a_refused_resend_of_a_hold_capture_is_marked_and_not_sent_again(conn: Conn) -> None:
+    """A hold has no read (plan step 8c removes holds): its capture is resent once, and a
+    refusal leaves it open, keyed and marked, never sent a third time."""
+    fake = FakePayPal()
+    payment_id = await _paid(conn, fake)
+    fake.time_out_first.add("capture")
+    async with conn.transaction():
+        command = await commands.record_command(conn, payment_id, "capture", amount_minor=30000)
+    await service.execute(conn, fake.client(), command["id"])
+    fake.refuse.add("capture")
+
+    first = await service.reconcile(conn, fake.client(), payment_id)
+    again = await service.reconcile(conn, fake.client(), payment_id)
+
+    row = await _command(conn, command["id"])
+    assert first == again == {command["id"]: "unknown"}
+    assert (row["error_code"], row["resend_refused_at"] is not None) == ("PAYPAL_DECLINED", True)
+    assert fake.posts("/capture") == 2
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        async with conn.transaction():
+            await commands.record_command(conn, payment_id, "void", amount_minor=0)
+
+
 async def test_a_refused_resend_is_read_before_any_ask(conn: Conn) -> None:
     """PayPal took the first refund, lost the answer, then refuses the resend: the order shows
     the refund, so it is recorded, with no resend and nothing for the operator."""

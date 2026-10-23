@@ -12,15 +12,18 @@ from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+import psycopg
 import pytest
 from httpx import AsyncClient
+from psycopg.conninfo import make_conninfo
 from psycopg.types.json import Jsonb
 
 from tests.integration.fake_paypal import FakePayPal
 from tests.integration.payloads import TRIP, post_trip
 from tidehold.bootstrap import worker
-from tidehold.money import service
+from tidehold.money import commands, service
 from tidehold.money.paypal import TEST_CARD
+from tidehold.platform import due_actions as due
 from tidehold.platform.db import Conn, connect
 from tidehold.policy.providers import Completion, ProviderError
 from tidehold.settlement import drafts, execute
@@ -594,14 +597,15 @@ async def _row_lock_waiters(conn: Conn) -> int:
     return int(row["n"]) if row else 0
 
 
+@pytest.mark.parametrize("percent", [50, 100])
 async def test_a_proposal_refunds_a_payment_once_when_settled_twice(
-    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal, database_url: str
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal, percent: int
 ) -> None:
     """Two runs of one settlement both find no refund yet and both wait on the deposit's row:
-    the second to record it is refused by the per-proposal index (a half refund fits the
-    capture twice) and leaves the sending to the first."""
-    half = [{"kind": "refund", "percent": 50, "deductions": [], "credit_expiry_months": None}]
-    trip = await _trip(operator, [{**WHOLE_TRIP_RULE, "remedies": half}])
+    the second to get it finds the first's refund and leaves the sending to it, whether or
+    not a second refund would still fit the capture (50%: it would; 100%: it would not)."""
+    remedy = {"kind": "refund", "percent": percent, "deductions": [], "credit_expiry_months": None}
+    trip = await _trip(operator, [{**WHOLE_TRIP_RULE, "remedies": [remedy]}])
     await _guest(operator, client, conn, paypal, trip["id"])
     proposal = await _cancel(operator, trip["id"], "rest", 1)
     assert proposal["state"] == "accepted"
@@ -611,6 +615,7 @@ async def test_a_proposal_refunds_a_payment_once_when_settled_twice(
         )
     ).fetchone()
     assert deposit is not None
+    database_url = make_conninfo(conn.info.dsn, password=conn.info.password)
 
     async def run() -> None:
         async with await connect(database_url) as other:
@@ -628,14 +633,65 @@ async def test_a_proposal_refunds_a_payment_once_when_settled_twice(
                 await asyncio.sleep(0.05)
             else:
                 pytest.fail("the settlements never waited on the deposit's row")
-        await asyncio.gather(*racing, return_exceptions=True)
+        results = await asyncio.gather(*racing, return_exceptions=True)
+    # a run steps aside for the other (the refund, and at 100% the balance's void too) and
+    # asks to run again; nothing fails
+    assert {type(r).__name__ for r in results} <= {"NoneType", "RetryLater"}
+    assert "RetryLater" in {type(r).__name__ for r in results}
     await execute.settle(conn, paypal.client(), UUID(proposal["id"]), _now())
 
     refunds = await (
         await conn.execute("select amount_minor, status from money_commands where kind = 'refund'")
     ).fetchall()
-    assert [(r["amount_minor"], r["status"]) for r in refunds] == [(2500, "succeeded")]
+    assert [(r["amount_minor"], r["status"]) for r in refunds] == [(50 * percent, "succeeded")]
     assert paypal.posts("/refund") == 1
+    # the database refuses a second live refund for the decision too, whoever writes it
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        await conn.execute(
+            "insert into money_commands (id, payment_id, kind, target_id, amount_minor,"
+            " request_id, invoice_id, status, proposal_id)"
+            " select gen_random_uuid(), payment_id, kind, target_id, 1, request_id || '-2',"
+            " invoice_id || '-2', 'pending', proposal_id from money_commands where kind = 'refund'"
+        )
+
+
+async def test_a_settlement_refund_sent_before_a_crash_is_read_and_finished(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+) -> None:
+    """A run claimed the refund (it may have reached PayPal) and stopped before recording the
+    answer: the next run does not send it blind, it has PayPal read, and the settlement ends."""
+    trip = await _trip(operator, [WHOLE_TRIP_RULE])
+    await _guest(operator, client, conn, paypal, trip["id"])
+    proposal = await _cancel(operator, trip["id"], "rest", 1)
+    deposit = await (
+        await conn.execute(
+            "select deposit_payment_id as id from guests where trip_id = %s", (trip["id"],)
+        )
+    ).fetchone()
+    assert deposit is not None
+    async with conn.transaction():
+        refund = await commands.record_refund(
+            conn, deposit["id"], amount_minor=5000, now=_now(), proposal_id=UUID(proposal["id"])
+        )
+        await commands.claim(conn, refund["id"])
+
+    with pytest.raises(due.RetryLater):
+        await execute.settle(conn, paypal.client(), UUID(proposal["id"]), _now())
+    reconcile = await (
+        await conn.execute(
+            "select 1 from due_actions where kind = 'reconcile_payment' and payment_id = %s"
+            " and state = 'pending'",
+            (deposit["id"],),
+        )
+    ).fetchone()
+    for minutes in (2, 4, 6):
+        await _tick(conn, paypal, _now() + timedelta(minutes=minutes))
+
+    assert reconcile is not None
+    assert paypal.posts("/refund") == 1
+    assert {p["kind"]: p["state"] for p in await _proposals(operator, trip["id"])} == {
+        "settlement": "executed"
+    }
 
 
 # --- drafting asks ---------------------------------------------------------------------------

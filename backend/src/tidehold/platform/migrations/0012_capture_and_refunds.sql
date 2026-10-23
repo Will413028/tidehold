@@ -14,10 +14,11 @@ alter table payments
     add column captured_at timestamptz;
 
 update payments set intent = case purpose when 'deposit' then 'capture' else 'authorize' end;
+-- the command that captured: the open of a captured order, or the capture of a hold
 update payments p set captured_at = c.sent_at
     from money_commands c
-    where c.payment_id = p.id and c.status = 'succeeded' and c.kind in ('open', 'capture')
-      and p.state = 'captured';
+    where c.payment_id = p.id and c.status = 'succeeded' and p.state = 'captured'
+      and c.kind = case p.intent when 'capture' then 'open' else 'capture' end;
 update payments p set order_id = coalesce(c.order_id, c.result ->> 'orderId')
     from money_commands c
     where c.payment_id = p.id and c.kind = 'open' and c.status = 'succeeded';

@@ -20,6 +20,7 @@ from tidehold.money.amounts import usd
 from tidehold.money.paypal import PayPalClient
 from tidehold.platform import due_actions as due
 from tidehold.platform.db import Conn
+from tidehold.platform.errors import Conflict
 from tidehold.settlement import proposals
 from tidehold.settlement.plan import Payment, settle_payment
 from tidehold.trips import store as trips
@@ -58,7 +59,7 @@ async def _record(
                 amount_minor=move["amount_minor"],
                 proposal_id=proposal["id"],
             )
-    except psycopg.errors.UniqueViolation:
+    except (psycopg.errors.UniqueViolation, commands.RefundAlreadyRecorded):
         return None
 
 
@@ -87,9 +88,17 @@ async def _send(
             )
     if existing["status"] != "pending":
         return str(existing["status"])
-    if existing["sent_at"] is not None:
-        return "unknown"
-    return await service.execute(conn, client, existing["id"])
+    try:
+        # only the first send goes from here: a concurrent run of this settlement may be
+        # sending it right now, and a send whose answer was lost is resent only after a read
+        return await service.execute(conn, client, existing["id"], first_send=True)
+    except Conflict as error:
+        if error.code not in ("MONEY_COMMAND_ALREADY_SENT", "MONEY_COMMAND_NOT_OPEN"):
+            raise
+    async with conn.transaction():
+        await due.schedule(conn, "reconcile_payment", payment_id, due_at=None)
+    stored = await _command(conn, payment_id, move["kind"], proposal["id"])
+    return "unknown" if stored is None or stored["status"] == "pending" else str(stored["status"])
 
 
 def _released(proposal_rows: list[DictRow], guest_id: str) -> int:

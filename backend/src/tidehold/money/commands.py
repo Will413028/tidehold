@@ -246,6 +246,10 @@ async def record_command(
     )
 
 
+class RefundAlreadyRecorded(Conflict):
+    """This settlement already has a live refund of this payment."""
+
+
 async def record_refund(
     conn: Conn, payment_id: UUID, *, amount_minor: int, now: datetime, proposal_id: UUID | None
 ) -> DictRow:
@@ -255,6 +259,18 @@ async def record_refund(
     current = await payment(conn, payment_id, lock=True)
     if current["state"] != "captured":
         raise Conflict("PAYMENT_NOT_CAPTURED")
+    if (
+        proposal_id is not None
+        and await (
+            await conn.execute(
+                "select 1 from money_commands where proposal_id = %s and payment_id = %s"
+                " and kind = 'refund' and status <> 'rejected'",
+                (proposal_id, payment_id),
+            )
+        ).fetchone()
+    ):
+        # another run of the same settlement got the lock first; the unique index backs this
+        raise RefundAlreadyRecorded("REFUND_ALREADY_RECORDED")
     await _check_refund(conn, current, amount_minor, now)
     kind: Kind = "refund"
     return await _insert(
@@ -269,9 +285,19 @@ async def record_refund(
     )
 
 
-async def claim(conn: Conn, command_id: UUID) -> DictRow:
+async def claim(conn: Conn, command_id: UUID, *, first_send: bool = False) -> DictRow:
     """Mark an open command as sent, so no newer attempt can replace it. `resend` says
-    whether it went to PayPal before, whose answer then cannot prove that no money moved."""
+    whether it went to PayPal before, whose answer then cannot prove that no money moved.
+    With `first_send`, a command someone already sent is refused (`MONEY_COMMAND_ALREADY_SENT`):
+    only reconciliation resends, after reading PayPal (D18 D4)."""
+    if first_send:
+        prior = await (
+            await conn.execute(
+                "select sent_at from money_commands where id = %s for update", (command_id,)
+            )
+        ).fetchone()
+        if prior is not None and prior["sent_at"] is not None:
+            raise Conflict("MONEY_COMMAND_ALREADY_SENT")
     row = await (
         await conn.execute(
             "with prior as (select id, sent_at from money_commands where id = %s for update)"

@@ -20,10 +20,10 @@ class FakePayPal:
         # Knobs a test turns to reproduce PayPal's failure modes.
         self.card_status = "CREATED"
         self.refund_status = "COMPLETED"
-        self.time_out_first: set[str] = (
-            set()
-        )  # suffixes whose first call takes effect, then times out
-        self.lose_first: set[str] = set()  # suffixes whose first call times out with no effect
+        # path suffixes whose first call takes effect but its answer is lost (a timeout) ...
+        self.time_out_first: set[str] = set()
+        # ... or times out without taking effect
+        self.lose_first: set[str] = set()
         self.refuse: set[str] = set()  # path suffixes PayPal answers with 422
 
     def client(self) -> PayPalClient:

@@ -33,14 +33,15 @@ The change only adds. The hold paths (AUTHORIZE, capture of an authorization, vo
 - A refund answered `PENDING` completes as `unknown` with error code `PAYPAL_REFUND_PENDING` and schedules `reconcile_payment`; `COMPLETED` succeeds; any other status is unexpected (stays open).
 - On a refusal of a resend, the command stays `unknown`, as today, and is stamped `resend_refused_at`.
 - `reconcile` reads before it resends (ADR D4), for commands that are `unknown`, stamped, or `pending` with `sent_at` set (sent, answer lost; review finding 4):
-  - **open**: with an order id, `get_order`. Only the collection the payment's intent asks for counts, and only a `COMPLETED` capture (or `CREATED` hold) of exactly the command's amount in USD completes it, in the shape `_open` records; anything else placed stays undecided. With nothing placed: `APPROVED` (checkout) is resent under the same request id; `CREATED`, `PAYER_ACTION_REQUIRED` or `VOIDED` is rejected (nothing placed, and nothing will be without the buyer); an order PayPal no longer knows (404) is rejected. Without an order id the command is resent (review finding 2).
+  - **open**: with an order id, `get_order`. Only the collection the payment's intent asks for counts, and only a `COMPLETED` capture (or `CREATED` hold) of exactly the command's amount in USD completes it, in the shape `_open` records; anything else placed stays undecided. With nothing placed: `APPROVED` (checkout) is resent under the same request id; `CREATED`, `PAYER_ACTION_REQUIRED` or `VOIDED` is rejected (nothing placed, and nothing will be without the buyer; a resend would only be refused and keep the guest's attempt blocked); an order PayPal does not show (404) is resent under its key, as the plan says, since a 404 does not prove nothing was captured. Without an order id the command is resent (review finding 2; closing review finding 6).
+  - Deviation from the plan's wording ("not captured: resend"): the rejection of `CREATED`, `PAYER_ACTION_REQUIRED` and `VOIDED` orders. Reported to the developer.
   - **refund**: with a stored refund id (a `PENDING` answer), `get_refund`; otherwise `get_order` on the payment's order, matched on our `invoice_id`. `COMPLETED` of the command's amount succeeds, `FAILED` or `CANCELLED` rejects, `PENDING` stays open. Not found in a successful read: resent, unless stamped.
   - A read that fails (timeout, 5xx, any 4xx other than an order's 404) proves nothing: no resend, no `complete` (review finding 7).
   - A command settled by a read that carries a proposal schedules `settle_proposal` again, so a settlement that stopped waiting (a refund long `PENDING`) still finishes (review finding 6).
   - A stamped command whose read cannot decide is left open and not resent again (step 8b asks the operator).
   - The hold kinds (capture of an authorization, void, reauthorize) keep today's resend without a read. They have no order-level read in scope, and step 8c removes them.
 - `reconcile_due` keeps raising `RetryLater` while an outcome is unknown, so a pending refund is read again with backoff; after the attempts run out the action fails and shows in the console's failed actions (step 9). A stamped command whose read cannot decide also returns `unknown`, so its action fails the same way; that is intended until 8b's ask.
-- 8a's `settle` gains `now` (from `settle_due`); `_send` treats a command already sent as unknown (left to `reconcile_payment`), and a run that loses the per-proposal index to a concurrent run of the same settlement returns without sending (review finding 1).
+- 8a's `settle` gains `now` (from `settle_due`); `_send` treats a command already sent as unknown and schedules `reconcile_payment` for it (a run that stopped after the send leaves nothing else to resolve it), and a run that finds its settlement's refund already recorded by a concurrent run (checked under the payment's lock before the amount bound, backed by the unique index) returns without sending (review finding 1; closing review findings 1 and 2).
 
 ## Sandbox smoke (`bootstrap/sandbox.py`)
 
@@ -90,3 +91,21 @@ An independent reviewer read the design against the plan, the ADR and the code, 
 | 14 | `now` must be required for refunds | LOW | Changed: `record_refund` requires it |
 | 15 | Threat model, the cap test rename, coverage, quality-lock counts missing | LOW | Changed: threat-model surface 2 in the same commit; the rename belongs to step 8c in the plan (the test still sends a void), and the threat model now says so; coverage and counts with the acceptance |
 | 16 | A stamped refund that a read shows absent stays open forever | LOW | Rejected for step 4: the plan leaves a read that cannot decide to step 8b's ask |
+
+## Code review before commit (2026-10-23)
+
+An independent reviewer read the committed change (`e83ff54`) against the design, the plan and the ADR, ran the suites and probed findings 1 and 2 with a temporary test (deleted). 9 findings (1 HIGH, 2 MED, 6 LOW); all fixed in the next commit.
+
+| # | Finding | Severity | Disposition |
+|---|---|---|---|
+| 1 | A settlement command sent but never answered (the run stopped after the send) stayed stuck: `_send` waited for a reconcile nothing had scheduled; regression against 8a, voids included | HIGH | Fixed: `_send` schedules `reconcile_payment`; `test_a_settlement_refund_sent_before_a_crash_is_read_and_finished`, mutation (no schedule) fails it |
+| 2 | With a full refund the losing concurrent run hit `REFUND_EXCEEDS_CAPTURED` before the unique index | MED | Fixed: `record_refund` checks for the settlement's live refund under the lock first (`RefundAlreadyRecorded`), the index stays as the database's guard |
+| 3 | The settled-twice test discarded the runs' outcomes | MED | Fixed: outcomes asserted (only `None` or `RetryLater`), 50% and 100%, and a direct insert proves the index; mutations (the loser raises; no index) fail it |
+| 4 | `captured_at` backfill could take the hold's `open` instead of its capture | LOW | Fixed: the command kind follows the payment's intent |
+| 5 | One command completed meanwhile aborted the rest of `reconcile` | LOW | Fixed: settling from a read is caught like a send |
+| 6 | A 404 order read rejected the `open`, where the plan says resend | LOW | Fixed: resent under its key |
+| 7 | A refund PayPal reports `FAILED` or `CANCELLED` lost that status | LOW | Fixed: the error code names it (`PAYPAL_REFUND_FAILED`) |
+| 8 | `get_capture` untested; loose types; formatting | LOW | Fixed: unit test, `Refund` types, `isinstance`, the fake's knobs |
+| 9 | The hold capture's refused resend lost its test, and `_read` skipped the "marked, not sent again" rule for hold kinds | LOW | Fixed: `test_a_refused_resend_of_a_hold_capture_is_marked_and_not_sent_again` found the skip; `_read` now applies the rule to every kind |
+
+After these fixes, `make check`'s integration run failed once on `test_a_proposal_refunds_a_payment_once_when_settled_twice[100]`: both runs found the balance's unsent void and both claimed and sent it (same request id, so no money moved twice), and the later one got `MONEY_COMMAND_NOT_OPEN`. The race predates D18 (8a's `_send` executed any `pending` command); the new concurrent test exposed it. Fixed: `claim(..., first_send=True)` refuses a command already sent (`MONEY_COMMAND_ALREADY_SENT`), `_send` uses it and leaves such a command to `reconcile_payment`, which resends only after a read. 15 reruns of the concurrent and crash tests since, 0 failures.

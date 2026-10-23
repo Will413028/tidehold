@@ -44,6 +44,37 @@ Read: NWS gale and storm warnings and MeteoAlarm wind warnings are recorded trig
 
 ## Step 4: money engine port
 
+### Coverage after the D18 rewrite (2026-10-23, report only)
+
+`make coverage` on `feat/step4-capture-refunds` (253 backend tests, PostgreSQL 18 in a local container), money and settlement:
+
+```
+Name                                   Stmts   Miss Branch BrPart  Cover   Missing
+----------------------------------------------------------------------------------
+src/tidehold/money/commands.py           137     10     50      9    90%   83, 143, 183, 205, 232, 236, 261, 366, 412-413
+src/tidehold/money/paypal.py             168      5     20      3    96%   97, 108, 113, 168-169, 221->223
+src/tidehold/money/service.py            218     47     76     13    76%   57, 67-68, 78, 93, 109, 128, 136, 140-141, 155, 205-208, 211-213, 218-228, 235, 247, 249-250, 272-273, 299, 321, 329-330, 339, 386-389, 404-413
+src/tidehold/settlement/execute.py       126      6     54      6    93%   97, 175, 179, 212, 249, 299
+src/tidehold/settlement/plan.py           35      2     12      3    89%   37, 42, 51->exit
+TOTAL (money, holds, settlement)        1540     94    398     57    92%
+```
+
+Read: the uncovered reconciliation lines are the order reads that end other than in a completed capture (a 404, a failed read, an order placed but not as recorded, an approved checkout resent, a `CREATED`/`VOIDED` order rejected; `service.py` 205-228) and a refund read that fails or finds no order (247-250); the test-card attempt without a card and the checkout paths are the ones step 4 measured before.
+
+### Mutations of the D18 rewrite (2026-10-23, local)
+
+Each made the named test fail; the code was restored afterwards.
+
+| Mutation | Test that failed |
+|---|---|
+| Refund window 181 days instead of 180 | `test_a_refund_past_the_window_is_refused_before_paypal_is_called` |
+| Per-proposal refund index made non-unique | `test_a_proposal_refunds_a_payment_once_when_settled_twice[50]`, `[100]` |
+| Open refunds left out of the refund bound | `test_two_concurrent_refunds_never_exceed_the_capture` |
+| Payment row not locked when recording a refund | `test_two_concurrent_refunds_never_exceed_the_capture` |
+| Resend an unknown open without reading its order | `test_an_unknown_open_is_resolved_from_its_order_before_any_resend` |
+| A run that finds its settlement's refund already recorded raises instead of stepping aside | `test_a_proposal_refunds_a_payment_once_when_settled_twice[50]`, `[100]` |
+| No reconcile scheduled for a settlement command already sent | `test_a_settlement_refund_sent_before_a_crash_is_read_and_finished` |
+
 ### Coverage of the money path (2026-10-19, report only)
 
 `make coverage` at the step-4 commits (53 backend tests, local PostgreSQL 18 container):
