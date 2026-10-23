@@ -33,8 +33,10 @@ Each change applied alone to the step 5b tree, the named tests run, the change r
 | Compile reads a deduction quote anywhere in the wording | `test_a_deduction_quote_outside_its_rules_quote_loses_the_rule` |
 | Publish stores no span for a ruling | `test_a_conditional_deduction_needs_its_ruling_before_publish_and_its_settlement_asks` |
 | The prompt excludes "fees" again ("… course failures or fees.") | `test_the_prompt_excludes_only_fees_charged_when_the_guest_cancels` |
+| Publish places a ruling's quote at its first occurrence, not inside a rule's clause (closing review) | `test_a_ruling_on_a_rules_fee_is_placed_in_that_rule_and_the_settlement_asks` |
+| The retry note lists a fee quoted from another passage as "not in the wording" (closing review) | `test_a_deduction_quote_outside_its_rules_quote_loses_the_rule` |
 
-The Groq benchmark at the new prompt hash has not run (a human on the VM); until it is appended to `model-benchmark.md`, `test_the_configured_model_and_prompt_are_the_last_benchmarked` fails.
+Prompt hash after step 5b: `76c549dec3d3f42d` (was `9f7c6e9404b56080`). The Groq benchmark at the new prompt hash has not run (a human on the VM); until it is appended to `model-benchmark.md`, `test_the_configured_model_and_prompt_are_the_last_benchmarked` fails.
 
 ## Step 7: official warnings and corroboration
 

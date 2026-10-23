@@ -3,6 +3,7 @@
 
 import json
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -71,49 +72,64 @@ async def test_the_dev_fixtures_compile_to_their_labelled_rules_and_rulings(
 
 
 SCUBA_FEE = "minus 3.5% processing fee for online payments"
+# A fee stated twice: the rule's own deduction is the second occurrence.
+FEE_WORDING = (
+    "Fees: online payments carry a 3.5% processing fee. Weather: if we cancel the trip, you "
+    "receive a full refund minus 3.5% processing fee."
+)
 
 
-Settle = Callable[[str | None], Awaitable[dict[str, Any]]]
+@dataclass(frozen=True)
+class Case:
+    """What the fake model compiles: the rules, the ruling topics and their quotes."""
+
+    wording: str
+    rules: list[dict[str, Any]]
+    topics: list[str]
+    quotes: dict[str, str]
+    product: str | None
+
+
+def _scuba_tribe(fee_quote: str | None) -> Case:
+    quotes = {} if fee_quote is None else {"deduction_conditional": fee_quote}
+    topics = LABELS["scuba-tribe"]["needs_ruling"]
+    return Case(_wording("scuba-tribe"), _model_rules("scuba-tribe"), topics, quotes, "Fun Dives:")
+
+
+Settle = Callable[[Case], Awaitable[dict[str, Any]]]
 
 
 @pytest.fixture
-def settle_scuba_tribe(
+def settle_compiled(
     operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal, model: FakeModel
 ) -> Settle:
-    async def settle(fee_quote: str | None) -> dict[str, Any]:
-        """Compile Scuba Tribe's wording with its `deduction_conditional` ruling quoting
-        `fee_quote`, answer every ruling, bind a trip, and cancel all of it for weather; the
-        settlement's proposal."""
-        wording = _wording("scuba-tribe")
-        topics = LABELS["scuba-tribe"]["needs_ruling"]
-        quotes = {} if fee_quote is None else {"deduction_conditional": fee_quote}
-        model.answer(wording, _model_rules("scuba-tribe"), topics, quotes)
-        compiled = await _compile(operator, wording)
-        body = {
-            "wording": wording,
-            "compilation_id": compiled["id"],
-            "rules": _model_rules("scuba-tribe"),
-        }
+    async def settle(case: Case) -> dict[str, Any]:
+        """Compile `case`, check that publishing waits for the `deduction_conditional`
+        answer, answer every ruling, bind a trip with one paid deposit, and cancel all of it
+        for weather; the settlement's proposal."""
+        model.answer(case.wording, case.rules, case.topics, case.quotes)
+        compiled = await _compile(operator, case.wording)
+        body = {"wording": case.wording, "compilation_id": compiled["id"], "rules": case.rules}
         asked_only = [
             {"index": i, "answer": "As written."}
-            for i, t in enumerate(topics)
+            for i, t in enumerate(case.topics)
             if t != "deduction_conditional"
+        ]
+        answers = [
+            {"index": i, "answer": "No fee on card payments."} for i in range(len(case.topics))
         ]
 
         unanswered = await operator.post(
             "/api/policy-versions", json={**body, "rulings": asked_only}
         )
-        answers = [{"index": i, "answer": "No fee on card payments."} for i in range(len(topics))]
         version = await operator.post("/api/policy-versions", json={**body, "rulings": answers})
 
         assert unanswered.json() == {"detail": "RULING_UNANSWERED"}
         assert version.status_code == 201, version.text
         tomorrow = datetime.now(ZoneInfo(TRIP["timezone"])).date() + timedelta(days=1)
+        product = {} if case.product is None else {"policy_product": case.product}
         trip = await post_trip(
-            operator,
-            trip_starting(tomorrow),
-            policy_version_id=version.json()["id"],
-            policy_product="Fun Dives:",
+            operator, trip_starting(tomorrow), policy_version_id=version.json()["id"], **product
         )
         assert trip.status_code == 201, trip.text
         trip_id = trip.json()["id"]
@@ -137,22 +153,59 @@ def settle_scuba_tribe(
 
 
 async def test_a_conditional_deduction_needs_its_ruling_before_publish_and_its_settlement_asks(
-    settle_scuba_tribe: Settle,
+    settle_compiled: Settle,
 ) -> None:
-    proposal = await settle_scuba_tribe(SCUBA_FEE)
+    proposal = await settle_compiled(_scuba_tribe(SCUBA_FEE))
 
     # Code finds the ruling's quote inside the rule's clause; the rule's two remedies ask too.
     assert (proposal["state"], proposal["reasons"]) == ("asked", ["REMEDY_CHOICE", "RULED_IN_TEXT"])
 
 
 async def test_without_a_quote_the_conditional_ruling_names_no_clause(
-    settle_scuba_tribe: Settle,
+    settle_compiled: Settle,
 ) -> None:
     # The control for the test above: the same answers, but the ruling quotes nothing, so
     # RULED_IN_TEXT there comes from the stored spans, not from the ruling's topic.
-    proposal = await settle_scuba_tribe(None)
+    proposal = await settle_compiled(_scuba_tribe(None))
 
     assert (proposal["state"], proposal["reasons"]) == ("asked", ["REMEDY_CHOICE"])
+
+
+async def test_a_ruling_on_a_rules_fee_is_placed_in_that_rule_and_the_settlement_asks(
+    settle_compiled: Settle,
+) -> None:
+    # One remedy, inside the mandate: without the ruling this settlement would be accepted.
+    # The ruling's short quote occurs first in the "Fees:" passage; it is placed in the rule.
+    deduction = {
+        "kind": "percent",
+        "value": 3.5,
+        "label": "processing fee",
+        "quote": "minus 3.5% processing fee",
+    }
+    rule = {
+        **POLICY["rules"][0],
+        "scope": "per_trip",
+        "remedies": [
+            {
+                "kind": "refund",
+                "percent": 100,
+                "deductions": [deduction],
+                "credit_expiry_months": None,
+            }
+        ],
+        "quote": "if we cancel the trip, you receive a full refund minus 3.5% processing fee.",
+    }
+    case = Case(
+        FEE_WORDING,
+        [rule],
+        ["deduction_conditional"],
+        {"deduction_conditional": "3.5% processing fee"},
+        None,
+    )
+
+    proposal = await settle_compiled(case)
+
+    assert (proposal["state"], proposal["reasons"]) == ("asked", ["RULED_IN_TEXT"])
 
 
 async def test_a_quote_the_wording_does_not_contain_never_becomes_a_rule(

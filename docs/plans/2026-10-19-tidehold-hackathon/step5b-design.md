@@ -72,3 +72,14 @@ An independent reviewer (a subagent that took no part in the design) read this d
 | 8 | Threat model row, `deduction_unspecified` with an unquoted ruling, the trip's product | LOW | Threat model row rewritten; the unquoted case is the residual of 2; the test binds "Fun Dives:" |
 
 ## Review before commit
+A second independent reviewer read the committed implementation (2e2ebd9) on 2026-10-23. 7 findings:
+
+| # | Finding | Severity | Outcome |
+|---|---|---|---|
+| 1 | A ruling's quote is still placed at its first occurrence (`locate`), so a short quote of the rule's fee can land in an earlier passage and a one-remedy rule settles with the deduction once the ruling is answered | HIGH | Fixed: a ruling's quote is placed inside a rule's clause or warning clause when it occurs there (`spans.locate_in_clauses`, on compile and publish), else at its first occurrence; `test_a_ruling_on_a_rules_fee_is_placed_in_that_rule_and_the_settlement_asks` (one remedy, inside the mandate: asked, not accepted; mutation: first occurrence) |
+| 2 | The editor shows the deduction's quote as the model's text, not cut from the wording; the API does not cut deduction clauses | MED | Recorded for step 9, whose scope has "the rule editor shows each deduction's quote": the rule form already edits the rule's own quote as text and shows the cut clause beside it; cutting deduction clauses in the version and compile views goes with that screen |
+| 3 | The retry note calls a fee quoted from another passage "not in the wording" and lists every deduction when only the rule's quote is missing | MED | Fixed: two lists, the second saying a deduction from another passage is not written in the remedy but asked as `deduction_conditional`; deductions listed as outside only when the rule's quote was found; the compile test asserts it (mutation fails it) |
+| 4 | The Scuba Tribe settlement test cannot show a money change (two remedies ask anyway) | MED | Fixed by finding 1's one-remedy test |
+| 5 | A deduction cannot be edited or removed in the web editor, so a narrowed rule quote meets `DEDUCTION_OUTSIDE_RULE` with no way out in the UI | LOW | Recorded for step 9 (rule editor); reported to the developer |
+| 6 | `key={d.label}` collides on two deductions with the same label | LOW | Fixed: keyed by label and quote |
+| 7 | The prompt never says a deduction from another passage stays out of the remedy | LOW | Fixed in the `deduction_conditional` item (prompt hash `76c549dec3d3f42d`) |

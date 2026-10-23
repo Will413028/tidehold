@@ -24,7 +24,7 @@ from tidehold.policy.schema import (
     Rule,
     Ruling,
 )
-from tidehold.policy.spans import Span, locate, locate_within
+from tidehold.policy.spans import Span, locate, locate_in_clauses, locate_within
 
 # One answer and, when a quote is not found, one retry that names the missing quotes.
 ATTEMPTS = 2
@@ -72,15 +72,17 @@ def _parse(text: str, sources: Sequence[str]) -> Compiled:
     return compiled
 
 
-def _missing(rule: Rule, wording: str) -> list[str]:
-    """The quotes of a rule that was not kept: its own or its warning's when not in the
-    wording, a deduction's when not inside the rule's quote."""
+def _missing(rule: Rule, wording: str) -> tuple[list[str], list[str]]:
+    """Why a rule was not kept: its quotes not in the wording, and (when the rule's quote was
+    found) its deduction quotes outside the rule's quote."""
     quotes = [rule.quote, *([rule.warning.quote] if rule.warning else [])]
-    missing = [q for q in quotes if locate(q, wording) is None]
-    span = locate(rule.quote, wording)
     deductions = [d.quote for remedy in rule.remedies for d in remedy.deductions]
-    return missing + [
-        q for q in deductions if span is None or locate_within(q, wording, span) is None
+    span = locate(rule.quote, wording)
+    if span is None:
+        return [q for q in quotes + deductions if locate(q, wording) is None], []
+    outside = [q for q in deductions if locate_within(q, wording, span) is None]
+    return [q for q in quotes + outside if locate(q, wording) is None], [
+        q for q in outside if locate(q, wording) is not None
     ]
 
 
@@ -106,13 +108,24 @@ def _locate_rule(rule: Rule, wording: str) -> LocatedRule | None:
     return LocatedRule(rule, span, warning_span, deduction_spans)
 
 
-def _retry_note(missing: list[str]) -> str:
-    quotes = "\n".join(f"- {json.dumps(q, ensure_ascii=False)}" for q in missing)
-    return (
-        "\n\nYour previous answer quoted passages that are not in the wording (a deduction's "
-        "quote must lie inside its rule's quote). Copy every quote exactly from the wording, "
-        f"character for character:\n{quotes}"
-    )
+def _listed(quotes: list[str]) -> str:
+    return "\n".join(f"- {json.dumps(q, ensure_ascii=False)}" for q in quotes)
+
+
+def _retry_note(missing: list[str], outside: list[str]) -> str:
+    note = ""
+    if missing:
+        note += (
+            "\n\nYour previous answer quoted passages that are not in the wording. Copy every "
+            f"quote exactly from the wording, character for character:\n{_listed(missing)}"
+        )
+    if outside:
+        note += (
+            "\n\nThese deductions are quoted from outside their rule's quote. A deduction "
+            "stated in another passage is not written in the remedy: ask "
+            f'"deduction_conditional" quoting it instead.\n{_listed(outside)}'
+        )
+    return note
 
 
 async def compile_policy(provider: Provider, wording: str, sources: Sequence[str]) -> Compilation:
@@ -131,9 +144,13 @@ async def compile_policy(provider: Provider, wording: str, sources: Sequence[str
         lost = [rule for rule, found in located if found is None]
         if not lost or attempt == ATTEMPTS:
             break
-        user = _user(wording) + _retry_note([q for r in lost for q in _missing(r, wording)])
+        why = [_missing(r, wording) for r in lost]
+        user = _user(wording) + _retry_note(
+            [q for missing, _ in why for q in missing], [q for _, out in why for q in out]
+        )
+    clauses = [s for k in kept for s in (k.span, k.warning_span) if s is not None]
     rulings = [
-        LocatedRuling(r, locate(r.quote, wording) if r.quote else None)
+        LocatedRuling(r, locate_in_clauses(r.quote, wording, clauses) if r.quote else None)
         for r in compiled.needs_ruling
     ]
     rulings += [

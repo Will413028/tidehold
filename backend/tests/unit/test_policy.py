@@ -130,8 +130,10 @@ async def test_a_deduction_quote_outside_its_rules_quote_loses_the_rule() -> Non
 
     assert compiled.rules == []
     assert [r.ruling.topic for r in compiled.needs_ruling] == ["span_not_found"]
-    assert FEE in provider.asked[1]
-    assert "If we cancel" not in provider.asked[1].split(">>>")[-1]
+    note = provider.asked[1].split(">>>")[-1]
+    assert FEE in note
+    assert "outside their rule's quote" in note
+    assert "not in the wording" not in note  # the rule's own quote was found
 
 
 def test_the_prompt_excludes_only_fees_charged_when_the_guest_cancels() -> None:

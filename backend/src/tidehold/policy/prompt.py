@@ -66,7 +66,8 @@ write no rule for it.
 - "deduction_conditional": a deduction that applies only on a condition a rule cannot state \
 (e.g. "for online payments", "if paid by card"), that contradicts a promised full refund, or \
 that a separate passage applies to refunds; quote the deduction. When it is inside the rule's \
-passage and has a figure, also write it in the remedy.
+passage and has a figure, also write it in the remedy; a deduction stated outside the rule's \
+passage is never written in the remedy.
 - "other": anything else the wording leaves open about weather cancellations.
 Do not invent rules for what the wording leaves open; ask instead. Do not ask about clauses \
 that only concern cancellations by the guest, no-shows, course failures, or fees charged when \

@@ -22,7 +22,7 @@ from psycopg.types.json import Jsonb
 from tidehold.platform.db import Conn, insert_returning
 from tidehold.platform.errors import Invalid, NotFound
 from tidehold.policy.schema import Rule, Ruling
-from tidehold.policy.spans import Span, locate, locate_within
+from tidehold.policy.spans import Span, locate, locate_in_clauses, locate_within
 from tidehold.warnings import catalogue
 
 MAX_WORDING = 12_000
@@ -97,7 +97,7 @@ def _check_rule(rule: Rule, wording: str) -> dict[str, Any]:
 
 
 def _check_rulings(
-    asked: Sequence[Ruling], answers: Sequence[Answer], wording: str
+    asked: Sequence[Ruling], answers: Sequence[Answer], wording: str, clauses: Sequence[Span]
 ) -> list[dict[str, Any]]:
     by_index = {a.index: a.answer.strip() for a in answers}
     if len(by_index) != len(answers) or set(by_index) - set(range(len(asked))):
@@ -109,7 +109,9 @@ def _check_rulings(
             "topic": ruling.topic,
             "question": ruling.question,
             "quote": ruling.quote,
-            "span": _span(locate(ruling.quote, wording) if ruling.quote else None),
+            "span": _span(
+                locate_in_clauses(ruling.quote, wording, clauses) if ruling.quote else None
+            ),
             "answer": by_index[i],
         }
         for i, ruling in enumerate(asked)
@@ -128,7 +130,11 @@ def check(
     sources = {rule.warning.source for rule in rules if rule.warning is not None}
     if len(sources) > 1:
         raise Invalid("MIXED_WARNING_SOURCES")
-    return Checked(checked, _check_rulings(asked, answers, wording), next(iter(sources), None))
+    clauses = [
+        Span(*item[key]) for item in checked for key in ("span", "warning_span") if item[key]
+    ]
+    rulings = _check_rulings(asked, answers, wording, clauses)
+    return Checked(checked, rulings, next(iter(sources), None))
 
 
 async def publish(

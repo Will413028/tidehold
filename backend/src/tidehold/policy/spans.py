@@ -8,6 +8,7 @@ else, a paraphrase or a dropped word included, is not found.
 """
 
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 # Typographic marks a model or a copy-paste turns into ASCII (and the reverse).
@@ -61,3 +62,14 @@ def locate_within(quote: str, wording: str, within: Span) -> Span | None:
     None when it does not occur there (a deduction is read inside its rule's clause)."""
     found = locate(quote, wording[within.start : within.end])
     return None if found is None else Span(within.start + found.start, within.start + found.end)
+
+
+def locate_in_clauses(quote: str, wording: str, clauses: Sequence[Span]) -> Span | None:
+    """Like `locate`, but an occurrence inside one of `clauses` wins over an earlier one
+    elsewhere: a ruling quoting a rule's fee is placed inside that rule's clause, so the
+    settlement sees the ruling on the rule (step 5b)."""
+    for clause in clauses:
+        found = locate_within(quote, wording, clause)
+        if found is not None:
+            return found
+    return locate(quote, wording)
