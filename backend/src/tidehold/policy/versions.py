@@ -2,10 +2,13 @@
 
 The operator starts from a compilation (or from nothing, writing rules by hand: the no-AI
 path) and publishes a version. Publishing checks what the money path relies on, whoever wrote
-the rule: every quote is found in the stored wording, a warning condition names a catalogue
-source and a non-empty set of that source's event values, two or more remedies say who
-chooses, and every item the compiler raised has an answer. The version is then fixed (a
-database trigger refuses any change) and trips bind it.
+the rule: every quote is found in the stored wording (a deduction's inside its rule's), a
+warning condition names a catalogue source and a non-empty set of that source's event values,
+two or more remedies say who chooses, and every item the compiler raised has an answer. The
+version is then fixed (a database trigger refuses any change) and trips bind it.
+
+A stored rule item is {rule, span, warning_span, deduction_spans}: offsets into the wording,
+`deduction_spans` per remedy, per deduction (step 5b; the 0008 migration's comment predates it).
 """
 
 from collections.abc import Sequence
@@ -19,7 +22,7 @@ from psycopg.types.json import Jsonb
 from tidehold.platform.db import Conn, insert_returning
 from tidehold.platform.errors import Invalid, NotFound
 from tidehold.policy.schema import Rule, Ruling
-from tidehold.policy.spans import Span, locate
+from tidehold.policy.spans import Span, locate, locate_within
 from tidehold.warnings import catalogue
 
 MAX_WORDING = 12_000
@@ -52,6 +55,13 @@ def _located(quote: str, wording: str) -> Span:
     return span
 
 
+def _deduction_span(quote: str, wording: str, rule_span: Span) -> Span:
+    span = locate_within(quote, wording, rule_span)
+    if span is not None:
+        return span
+    raise Invalid("DEDUCTION_OUTSIDE_RULE" if locate(quote, wording) else "SPAN_NOT_FOUND")
+
+
 def _check_rule(rule: Rule, wording: str) -> dict[str, Any]:
     span = _located(rule.quote, wording)
     if rule.product is not None and locate(rule.product, wording) is None:
@@ -72,7 +82,18 @@ def _check_rule(rule: Rule, wording: str) -> dict[str, Any]:
         raise Invalid("CHOOSER_MISSING")
     if any(r.kind == "none" and r.percent != 0 for r in rule.remedies):
         raise Invalid("REMEDY_NONE_WITH_PERCENT")
-    return {"rule": rule.model_dump(), "span": _span(span), "warning_span": _span(warning_span)}
+    # A deduction comes only from the wording, with its own span inside the rule's (ADR
+    # 2026-10-23 D3), so a ruling quoting it overlaps the rule and the settlement asks.
+    deduction_spans = [
+        [_span(_deduction_span(d.quote, wording, span)) for d in remedy.deductions]
+        for remedy in rule.remedies
+    ]
+    return {
+        "rule": rule.model_dump(),
+        "span": _span(span),
+        "warning_span": _span(warning_span),
+        "deduction_spans": deduction_spans,
+    }
 
 
 def _check_rulings(

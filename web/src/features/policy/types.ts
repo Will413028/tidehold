@@ -4,7 +4,8 @@ export type Cause = "weather" | "safety" | "any";
 export type Remedy = {
   kind: "refund" | "credit" | "none";
   percent: number;
-  deductions: { kind: "percent" | "fixed"; value: number; label: string }[];
+  /** each deduction quotes its own passage, inside the rule's quote (checked on publish) */
+  deductions: { kind: "percent" | "fixed"; value: number; label: string; quote: string }[];
   credit_expiry_months: number | null;
 };
 

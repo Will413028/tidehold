@@ -54,3 +54,10 @@ def locate(quote: str, wording: str) -> Span | None:
         return None
     last = at + len(needle) - 1
     return Span(origin[at], origin[last] + 1)
+
+
+def locate_within(quote: str, wording: str, within: Span) -> Span | None:
+    """Where `quote` occurs inside the `within` part of `wording`, as offsets into `wording`;
+    None when it does not occur there (a deduction is read inside its rule's clause)."""
+    found = locate(quote, wording[within.start : within.end])
+    return None if found is None else Span(within.start + found.start, within.start + found.end)

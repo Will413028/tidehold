@@ -120,6 +120,52 @@ async def test_a_warning_condition_quote_must_be_found_too(operator: AsyncClient
     assert response.json() == {"detail": "SPAN_NOT_FOUND"}
 
 
+FEE_WORDING = (
+    "Fees: online payments carry a 3.5% processing fee. Weather: if we cancel the trip, you "
+    "receive a full refund minus 3.5% processing fee."
+)
+FEE_RULE = "if we cancel the trip, you receive a full refund minus 3.5% processing fee."
+
+
+def _fee_rule(fee_quote: str) -> dict[str, Any]:
+    deduction = {"kind": "percent", "value": 3.5, "label": "processing fee", "quote": fee_quote}
+    remedy = {"kind": "refund", "percent": 100, "deductions": [deduction]}
+    return _rule(FEE_RULE, remedies=[{**remedy, "credit_expiry_months": None}])
+
+
+@pytest.mark.parametrize(
+    ("fee_quote", "code"),
+    [
+        ("minus 5% processing fee", "SPAN_NOT_FOUND"),
+        # In the wording, but in another passage than the rule's (step 5b).
+        ("online payments carry a 3.5% processing fee", "DEDUCTION_OUTSIDE_RULE"),
+    ],
+)
+async def test_a_deduction_quote_the_wording_does_not_contain_is_rejected(
+    fee_quote: str, code: str, operator: AsyncClient, conn: Conn
+) -> None:
+    refused = await operator.post(
+        "/api/policy-versions", json={"wording": FEE_WORDING, "rules": [_fee_rule(fee_quote)]}
+    )
+    published = await operator.post(
+        "/api/policy-versions",
+        json={"wording": FEE_WORDING, "rules": [_fee_rule("minus 3.5% processing fee")]},
+    )
+
+    assert (refused.status_code, refused.json()) == (400, {"detail": code})
+    assert published.status_code == 201, published.text
+    row = await (
+        await conn.execute(
+            "select rules from policy_versions where id = %s", (published.json()["id"],)
+        )
+    ).fetchone()
+    assert row is not None
+    [[[start, end]]] = row["rules"][0]["deduction_spans"]
+    # The second "3.5% processing fee", inside the rule's clause, not the first one.
+    assert FEE_WORDING[start:end] == "minus 3.5% processing fee"
+    assert start > FEE_WORDING.index("Weather:")
+
+
 @pytest.mark.parametrize(
     ("source", "values", "code"),
     [

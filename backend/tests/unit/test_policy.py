@@ -7,6 +7,7 @@ import httpx2 as httpx
 import pytest
 
 from tidehold.policy.compile import CompileFailed, compile_policy, propose_event_set
+from tidehold.policy.prompt import compile_prompt
 from tidehold.policy.providers import Completion, Gemini, Groq, ProviderError
 from tidehold.policy.schema import WIRE_SCHEMA
 from tidehold.policy.spans import locate
@@ -26,6 +27,7 @@ QUOTE = (
     "If we cancel the trip due to weather or safety reasons, you'll receive a full refund "
     "(minus 3.5% processing fee for online payments)"
 )
+FEE = "minus 3.5% processing fee for online payments"
 
 
 def test_a_quote_with_ascii_apostrophes_is_found_in_typographic_wording() -> None:
@@ -71,7 +73,14 @@ def _rule(quote: str, **overrides: Any) -> dict[str, Any]:
             {
                 "kind": "refund",
                 "percent": 100,
-                "deductions": [{"kind": "percent", "value": 3.5, "label": "online payment fee"}],
+                "deductions": [
+                    {
+                        "kind": "percent",
+                        "value": 3.5,
+                        "label": "online payment fee",
+                        "quote": FEE,
+                    }
+                ],
                 "credit_expiry_months": None,
             },
             {"kind": "credit", "percent": 100, "deductions": [], "credit_expiry_months": None},
@@ -94,6 +103,8 @@ async def test_a_compiled_rule_keeps_its_offsets_in_the_stored_wording() -> None
     [located] = compiled.rules
     assert located.rule.chooser == "guest"
     assert WORDING[located.span.start : located.span.end].endswith("online payments)")
+    [[fee], []] = located.deduction_spans
+    assert WORDING[fee.start : fee.end] == FEE
     assert compiled.needs_ruling == []
     assert compiled.attempts == 1
 
@@ -108,6 +119,29 @@ async def test_a_fabricated_quote_is_retried_once_then_becomes_a_ruling() -> Non
     assert [r.ruling.topic for r in compiled.needs_ruling] == ["span_not_found"]
     assert compiled.attempts == 2
     assert "Guests always receive" in provider.asked[1]
+
+
+async def test_a_deduction_quote_outside_its_rules_quote_loses_the_rule() -> None:
+    # The fee is in the wording, but not inside the clause the rule quotes (step 5b).
+    short = _rule("If we cancel the trip due to weather or safety reasons")
+    provider = Scripted([_answer(short), _answer(short)])
+
+    compiled = await compile_policy(provider, WORDING, ["nws"])
+
+    assert compiled.rules == []
+    assert [r.ruling.topic for r in compiled.needs_ruling] == ["span_not_found"]
+    assert FEE in provider.asked[1]
+    assert "If we cancel" not in provider.asked[1].split(">>>")[-1]
+
+
+def test_the_prompt_excludes_only_fees_charged_when_the_guest_cancels() -> None:
+    prompt = compile_prompt(["nws"])
+    [excluded] = [line for line in prompt.split(". ") if line.startswith("Do not ask about")]
+
+    assert "fees charged when the guest cancels" in " ".join(excluded.split())
+    assert " ".join(excluded.split()).count("fee") == 1
+    assert '"deduction_conditional"' in prompt
+    assert "own `quote`" in prompt
 
 
 async def test_a_retry_that_quotes_correctly_keeps_the_rule() -> None:

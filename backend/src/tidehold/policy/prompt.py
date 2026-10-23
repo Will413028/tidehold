@@ -40,8 +40,10 @@ booking or package.
 - `remedies`: one entry per alternative the wording offers. "refund" with the percent refunded; \
 "credit" (credit, voucher, rebooking, rescheduling, moving to another date: all are credit) with \
 the percent credited; "none" with percent 0 when the wording says no refund. "Refunded" or \
-"refund" without a figure means 100. Fees the wording \
-deducts go in `deductions` (a percent or a fixed amount with its label). \
+"refund" without a figure means 100. A fee the wording \
+deducts from this remedy goes in `deductions`: a percent or a fixed amount, its label, and its \
+own `quote`, the passage that states the deduction, copied exactly from inside the rule's \
+`quote`. Never add a deduction the wording does not state. \
 `credit_expiry_months` only when the wording states it for this credit.
 - `chooser`: with two or more remedies, "guest" when the wording gives the guest the option, \
 "operator" when the operator decides; null otherwise.
@@ -61,9 +63,14 @@ write no rule for it.
 - "conflicting_clauses": two passages give different outcomes for the same cancellation.
 - "credit_expiry_unspecified": a credit remedy with no stated expiry.
 - "deduction_unspecified": the wording deducts costs or fees without stating how much.
+- "deduction_conditional": a deduction that applies only on a condition a rule cannot state \
+(e.g. "for online payments", "if paid by card"), that contradicts a promised full refund, or \
+that a separate passage applies to refunds; quote the deduction. When it is inside the rule's \
+passage and has a figure, also write it in the remedy.
 - "other": anything else the wording leaves open about weather cancellations.
 Do not invent rules for what the wording leaves open; ask instead. Do not ask about clauses \
-that only concern cancellations by the guest, no-shows, course failures or fees.
+that only concern cancellations by the guest, no-shows, course failures, or fees charged when \
+the guest cancels.
 
 Catalogue sources: {sources}.
 """

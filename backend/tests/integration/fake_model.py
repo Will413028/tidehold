@@ -17,9 +17,21 @@ class FakeModel:
         self.failing = False
         self.calls = 0
 
-    def answer(self, wording: str, rules: list[dict[str, Any]], topics: list[str]) -> None:
+    def answer(
+        self,
+        wording: str,
+        rules: list[dict[str, Any]],
+        topics: list[str],
+        quotes: dict[str, str] | None = None,
+    ) -> None:
+        """Rulings quote nothing unless `quotes` gives a topic's quote."""
         rulings = [
-            {"topic": t, "question": f"How do you rule on {t}?", "quote": None} for t in topics
+            {
+                "topic": t,
+                "question": f"How do you rule on {t}?",
+                "quote": (quotes or {}).get(t),
+            }
+            for t in topics
         ]
         self.answers[wording] = json.dumps({"rules": rules, "needs_ruling": rulings})
 

@@ -70,6 +70,9 @@ def compilation_result(wording: str, compilation: Compilation) -> dict[str, Any]
                 "rule": located.rule.model_dump(),
                 "span": _span(located.span),
                 "warning_span": _span(located.warning_span),
+                "deduction_spans": [
+                    [_span(span) for span in spans] for spans in located.deduction_spans
+                ],
             }
             for located in compilation.rules
         ],

@@ -11,9 +11,9 @@
     "ts-ignore": 0
   },
   "tests": {
-    "backend-unit": 92,
-    "backend-integration": 178,
-    "web": 21,
+    "backend-unit": 94,
+    "backend-integration": 183,
+    "web": 22,
     "web-e2e": 12,
     "recorder": 9,
     "scripts": 9,

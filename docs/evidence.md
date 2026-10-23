@@ -20,6 +20,22 @@ Each mutation below made at least one test fail; the code was restored afterward
 | Drop Groq's output-token cap | `test_every_provider_call_caps_its_output_tokens[groq]` |
 | Change one line of the compile prompt | `test_the_configured_model_and_prompt_are_the_last_benchmarked` |
 
+## Step 5b: deductions from the wording
+
+### Mutations (2026-10-23, cloud container)
+
+Each change applied alone to the step 5b tree, the named tests run, the change reverted.
+
+| Mutation | Fails |
+|---|---|
+| Skip the deduction span check on publish (`_deduction_span` returns a span without locating) | `test_a_deduction_quote_the_wording_does_not_contain_is_rejected` (both cases) |
+| Publish reads a deduction quote anywhere in the wording, not inside its rule's | `test_a_deduction_quote_the_wording_does_not_contain_is_rejected[…DEDUCTION_OUTSIDE_RULE]` |
+| Compile reads a deduction quote anywhere in the wording | `test_a_deduction_quote_outside_its_rules_quote_loses_the_rule` |
+| Publish stores no span for a ruling | `test_a_conditional_deduction_needs_its_ruling_before_publish_and_its_settlement_asks` |
+| The prompt excludes "fees" again ("… course failures or fees.") | `test_the_prompt_excludes_only_fees_charged_when_the_guest_cancels` |
+
+The Groq benchmark at the new prompt hash has not run (a human on the VM); until it is appended to `model-benchmark.md`, `test_the_configured_model_and_prompt_are_the_last_benchmarked` fails.
+
 ## Step 7: official warnings and corroboration
 
 ### Recorded feeds read into the evidence store (2026-10-19 14:00 UTC)

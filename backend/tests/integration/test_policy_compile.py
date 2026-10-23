@@ -2,14 +2,19 @@
 (plan step 5 acceptance)."""
 
 import json
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from tests.integration.fake_model import FakeModel
-from tests.integration.payloads import POLICY, WORDING
+from tests.integration.fake_paypal import FakePayPal
+from tests.integration.payloads import POLICY, TRIP, WORDING, post_trip, trip_starting
+from tidehold.bootstrap import worker
 from tidehold.bootstrap.app import create_app
 from tidehold.platform.db import Conn
 from tidehold.platform.settings import Settings
@@ -50,7 +55,7 @@ async def _calls(conn: Conn) -> list[tuple[str, str]]:
     return [(r["mode"], r["status"]) for r in rows]
 
 
-@pytest.mark.parametrize("fixture", ["pure-dive", "blue-ribbon", "mikes-dauin"])
+@pytest.mark.parametrize("fixture", ["pure-dive", "blue-ribbon", "mikes-dauin", "scuba-tribe"])
 async def test_the_dev_fixtures_compile_to_their_labelled_rules_and_rulings(
     fixture: str, operator: AsyncClient, model: FakeModel
 ) -> None:
@@ -63,6 +68,91 @@ async def test_the_dev_fixtures_compile_to_their_labelled_rules_and_rulings(
     assert [r["rule"] for r in compiled["rules"]] == _model_rules(fixture)
     assert [r["clause"] for r in compiled["rules"]] == [r["quote"] for r in _model_rules(fixture)]
     assert [r["topic"] for r in compiled["needs_ruling"]] == LABELS[fixture]["needs_ruling"]
+
+
+SCUBA_FEE = "minus 3.5% processing fee for online payments"
+
+
+Settle = Callable[[str | None], Awaitable[dict[str, Any]]]
+
+
+@pytest.fixture
+def settle_scuba_tribe(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal, model: FakeModel
+) -> Settle:
+    async def settle(fee_quote: str | None) -> dict[str, Any]:
+        """Compile Scuba Tribe's wording with its `deduction_conditional` ruling quoting
+        `fee_quote`, answer every ruling, bind a trip, and cancel all of it for weather; the
+        settlement's proposal."""
+        wording = _wording("scuba-tribe")
+        topics = LABELS["scuba-tribe"]["needs_ruling"]
+        quotes = {} if fee_quote is None else {"deduction_conditional": fee_quote}
+        model.answer(wording, _model_rules("scuba-tribe"), topics, quotes)
+        compiled = await _compile(operator, wording)
+        body = {
+            "wording": wording,
+            "compilation_id": compiled["id"],
+            "rules": _model_rules("scuba-tribe"),
+        }
+        asked_only = [
+            {"index": i, "answer": "As written."}
+            for i, t in enumerate(topics)
+            if t != "deduction_conditional"
+        ]
+
+        unanswered = await operator.post(
+            "/api/policy-versions", json={**body, "rulings": asked_only}
+        )
+        answers = [{"index": i, "answer": "No fee on card payments."} for i in range(len(topics))]
+        version = await operator.post("/api/policy-versions", json={**body, "rulings": answers})
+
+        assert unanswered.json() == {"detail": "RULING_UNANSWERED"}
+        assert version.status_code == 201, version.text
+        tomorrow = datetime.now(ZoneInfo(TRIP["timezone"])).date() + timedelta(days=1)
+        trip = await post_trip(
+            operator,
+            trip_starting(tomorrow),
+            policy_version_id=version.json()["id"],
+            policy_product="Fun Dives:",
+        )
+        assert trip.status_code == 201, trip.text
+        trip_id = trip.json()["id"]
+        invited = await operator.post(f"/api/trips/{trip_id}/guests", json={"name": "Ana"})
+        token = invited.json()["guests"][-1]["token"]
+        assert (await client.post(f"/api/guest/{token}/deposit/test-card")).status_code == 200
+        await worker.tick(conn, worker.handlers(paypal.client()), datetime.now(UTC))
+        calls = model.calls
+
+        cancelled = await operator.post(
+            f"/api/trips/{trip_id}/cancellations",
+            json={"scope": "rest", "trip_day": 1, "cause": "weather"},
+        )
+
+        assert cancelled.status_code == 201, cancelled.text
+        assert model.calls == calls  # settlement makes no model call
+        proposal: dict[str, Any] = cancelled.json()
+        return proposal
+
+    return settle
+
+
+async def test_a_conditional_deduction_needs_its_ruling_before_publish_and_its_settlement_asks(
+    settle_scuba_tribe: Settle,
+) -> None:
+    proposal = await settle_scuba_tribe(SCUBA_FEE)
+
+    # Code finds the ruling's quote inside the rule's clause; the rule's two remedies ask too.
+    assert (proposal["state"], proposal["reasons"]) == ("asked", ["REMEDY_CHOICE", "RULED_IN_TEXT"])
+
+
+async def test_without_a_quote_the_conditional_ruling_names_no_clause(
+    settle_scuba_tribe: Settle,
+) -> None:
+    # The control for the test above: the same answers, but the ruling quotes nothing, so
+    # RULED_IN_TEXT there comes from the stored spans, not from the ruling's topic.
+    proposal = await settle_scuba_tribe(None)
+
+    assert (proposal["state"], proposal["reasons"]) == ("asked", ["REMEDY_CHOICE"])
 
 
 async def test_a_quote_the_wording_does_not_contain_never_becomes_a_rule(

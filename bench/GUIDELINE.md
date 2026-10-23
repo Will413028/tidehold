@@ -10,13 +10,13 @@ Each fixture in `fixtures/` is the cancellation section an operator would paste,
 
 A rule says what a guest gets when the **operator** cancels, or accepts a cancellation of, a trip day or the whole trip.
 
-1. **Only operator cancellations.** Guest cancellations, no-shows, late arrivals, course failures, date-change fees and park or permit fees produce no rule and no ruling.
+1. **Only operator cancellations.** Guest cancellations, no-shows, late arrivals, course failures, fees charged when the guest cancels (date-change, transfer or administration fees for a guest's cancellation) and park or permit fees produce no rule and no ruling. A fee deducted from refunds the operator gives is not excluded (rule 6).
    A change of dive site, itinerary or schedule is not a cancellation, and a disclaimer of financial responsibility is not a remedy: neither is a rule; when one contradicts a rule for the same cancellation, it is a `conflicting_clauses` ruling.
 2. **Causes** are `weather` (weather, sea state, wind, storms, conditions), `safety` (safety concerns, unsafe conditions) or `any` (any operator cancellation). A list that includes a catch-all ("other circumstances", "operational reasons", "force majeure", "mechanical issues" next to weather) is `any` alone. A clause about other causes only (mechanical issues alone) is not a rule.
 3. **Warning condition** only when the payout depends on official information ("unless there has been an official storm warning issued by …", a park closure decided by the authorities). `named_as` is the authority as written; `source` is null unless the wording names PAGASA, NWS or MeteoAlarm. Event values are never labelled at compile time.
 4. **Scope** `per_day` when the wording speaks of a dive, an activity, a session or a day being cancelled or delayed (also inside a course); `per_trip` for a trip, charter, booking or package.
 5. **Applies to** `both` unless the wording limits it to the deposit or the balance.
-6. **Remedies**, one per alternative: `refund` or `credit` with the percent; rescheduling, rebooking, a date change or a voucher is `credit`; "refunded" without a figure is 100; "no refund" is `none` 0. A deduction with a stated figure is a deduction; one without a figure is a `deduction_unspecified` ruling and the remedy keeps its percent. A stated credit validity goes in `credit_expiry_months`.
+6. **Remedies**, one per alternative: `refund` or `credit` with the percent; rescheduling, rebooking, a date change or a voucher is `credit`; "refunded" without a figure is 100; "no refund" is `none` 0. A deduction with a stated figure inside the rule's passage is a deduction, with its own `quote` copied from inside the rule's quote (step 5b); one without a figure is a `deduction_unspecified` ruling and the remedy keeps its percent. A deduction that applies only on a condition a rule cannot state ("for online payments", "if paid by card"), that contradicts a promised full refund, or that a separate passage applies to refunds is a `deduction_conditional` ruling; when it is inside the rule's passage with a figure, the remedy also carries it. A stated credit validity goes in `credit_expiry_months`.
 7. **Chooser** with two or more remedies: `guest` when the guest is given the choice ("guests may choose", "you'll receive … or the option to"), `operator` when the operator decides; otherwise null and a `remedy_chooser_unclear` ruling.
 8. **Product**: the section heading when the wording has separate sections per product; null otherwise. Not scored.
 9. One rule per passage; never join separate passages into one rule.
@@ -33,10 +33,11 @@ Scored as the set of topics per fixture (one topic counts once however many pass
 - `conflicting_clauses`: two passages give different outcomes for the same cancellation.
 - `credit_expiry_unspecified`: a credit remedy without a stated expiry.
 - `deduction_unspecified`: costs or fees deducted without a figure.
+- `deduction_conditional`: a deduction on a condition a rule cannot state, against a promised full refund, or applied to refunds by a separate passage (labels version 2).
 
 ## Scoring
 
-- A predicted rule matches a labelled rule when causes (as a set), warning presence and source, scope, applies to, remedies (kind, percent, deductions) with credit expiry, and chooser are all equal; rules are paired one to one. Rule precision and recall follow.
+- A predicted rule matches a labelled rule when causes (as a set), warning presence and source, scope, applies to, remedies (kind, percent, deductions: kind and value, not the quote) with credit expiry, and chooser are all equal; rules are paired one to one. Rule precision and recall follow.
 - Needs-ruling precision and recall over the topic sets.
 - Event sets: exact match of the proposed set.
 

@@ -3,8 +3,9 @@ event set (D16, plan steps 2 and 5).
 
 The model's output is untrusted: it must match the schema, every quote must be found in the
 stored wording (`spans.locate`), and a warning source or event value must come from the
-catalogue the caller passes (`warnings.catalogue` in the product). A rule whose quote cannot be
-found after one retry is not kept: it becomes a "span_not_found" ruling for the operator.
+catalogue the caller passes (`warnings.catalogue` in the product). A rule whose quote or warning
+quote cannot be found, or whose deduction quote is not inside the rule's quote, after one
+retry is not kept: it becomes a "span_not_found" ruling for the operator.
 """
 
 import json
@@ -23,7 +24,7 @@ from tidehold.policy.schema import (
     Rule,
     Ruling,
 )
-from tidehold.policy.spans import Span, locate
+from tidehold.policy.spans import Span, locate, locate_within
 
 # One answer and, when a quote is not found, one retry that names the missing quotes.
 ATTEMPTS = 2
@@ -38,6 +39,8 @@ class LocatedRule:
     rule: Rule
     span: Span
     warning_span: Span | None
+    # per remedy, the span of each of its deductions' quotes
+    deduction_spans: list[list[Span]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -69,24 +72,46 @@ def _parse(text: str, sources: Sequence[str]) -> Compiled:
     return compiled
 
 
+def _missing(rule: Rule, wording: str) -> list[str]:
+    """The quotes of a rule that was not kept: its own or its warning's when not in the
+    wording, a deduction's when not inside the rule's quote."""
+    quotes = [rule.quote, *([rule.warning.quote] if rule.warning else [])]
+    missing = [q for q in quotes if locate(q, wording) is None]
+    span = locate(rule.quote, wording)
+    deductions = [d.quote for remedy in rule.remedies for d in remedy.deductions]
+    return missing + [
+        q for q in deductions if span is None or locate_within(q, wording, span) is None
+    ]
+
+
 def _locate_rule(rule: Rule, wording: str) -> LocatedRule | None:
     span = locate(rule.quote, wording)
     warning_span = locate(rule.warning.quote, wording) if rule.warning else None
     if span is None or (rule.warning is not None and warning_span is None):
         return None
+    # A deduction is read inside its rule's clause (step 5b), so a ruling on it is a ruling on
+    # the rule.
+    deduction_spans: list[list[Span]] = []
+    for remedy in rule.remedies:
+        spans = [locate_within(d.quote, wording, span) for d in remedy.deductions]
+        found = [s for s in spans if s is not None]
+        if len(found) != len(spans):
+            return None
+        deduction_spans.append(found)
     # Event values are chosen with the operator (propose_event_set), never at compile time.
     if rule.warning and rule.warning.event_values:
         rule = rule.model_copy(
             update={"warning": rule.warning.model_copy(update={"event_values": []})}
         )
-    return LocatedRule(rule, span, warning_span)
+    return LocatedRule(rule, span, warning_span, deduction_spans)
 
 
 def _retry_note(missing: list[str]) -> str:
     quotes = "\n".join(f"- {json.dumps(q, ensure_ascii=False)}" for q in missing)
     return (
-        "\n\nYour previous answer quoted passages that are not in the wording. Copy every quote "
-        f"exactly from the wording, character for character:\n{quotes}"
+        "\n\nYour previous answer quoted passages that are not in the wording (a deduction's "
+        "quote must lie inside its rule's quote). Copy every quote exactly from the wording, "
+        f"character for character:\n{quotes}"
     )
 
 
@@ -106,7 +131,7 @@ async def compile_policy(provider: Provider, wording: str, sources: Sequence[str
         lost = [rule for rule, found in located if found is None]
         if not lost or attempt == ATTEMPTS:
             break
-        user = _user(wording) + _retry_note([r.quote for r in lost])
+        user = _user(wording) + _retry_note([q for r in lost for q in _missing(r, wording)])
     rulings = [
         LocatedRuling(r, locate(r.quote, wording) if r.quote else None)
         for r in compiled.needs_ruling

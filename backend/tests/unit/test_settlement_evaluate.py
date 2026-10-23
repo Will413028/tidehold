@@ -101,7 +101,9 @@ def test_a_cause_no_rule_covers_asks_with_standard_options() -> None:
             _rule(
                 remedies=[
                     _remedy(
-                        "refund", 100, deductions=[{"kind": "fixed", "value": 50, "label": "fee"}]
+                        "refund",
+                        100,
+                        deductions=[{"kind": "fixed", "value": 50, "label": "fee", "quote": "q"}],
                     )
                 ]
             ),
@@ -143,7 +145,11 @@ def test_a_percent_deduction_is_exact() -> None:
     rule = _rule(
         scope="per_trip",
         remedies=[
-            _remedy("refund", 100, deductions=[{"kind": "percent", "value": 3.5, "label": "fee"}])
+            _remedy(
+                "refund",
+                100,
+                deductions=[{"kind": "percent", "value": 3.5, "label": "fee", "quote": "q"}],
+            )
         ],
     )
     evaluation = evaluate([RuleIn(rule)], WHOLE, [GuestMoney("g", 10000, 0)])

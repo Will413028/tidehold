@@ -43,7 +43,8 @@ export function RemedyEditor({ remedy, onChange }: { remedy: Remedy; onChange: (
       )}
       {remedy.deductions.map((d) => (
         <p key={d.label}>
-          Deduction: {d.label} ({d.kind === "percent" ? `${d.value}%` : `${d.value}, fixed`})
+          Deduction: {d.label} ({d.kind === "percent" ? `${d.value}%` : `${d.value}, fixed`}), quoted:{" "}
+          <q>{d.quote}</q>
         </p>
       ))}
     </div>

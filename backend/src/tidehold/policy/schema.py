@@ -25,6 +25,7 @@ RulingTopic = Literal[
     "conflicting_clauses",
     "credit_expiry_unspecified",
     "deduction_unspecified",
+    "deduction_conditional",
     "span_not_found",
     "other",
 ]
@@ -40,6 +41,8 @@ class Deduction(Wire):
     kind: Literal["percent", "fixed"]
     value: Annotated[float, Field(ge=0)]
     label: str
+    # The passage that states the deduction, verbatim; verified like the rule's (step 5b).
+    quote: Quote
 
 
 class Remedy(Wire):
@@ -113,6 +116,7 @@ _DEDUCTION = _object(
     kind=_enum(("percent", "fixed")),
     value={"type": "number", "minimum": 0},
     label=_STRING,
+    quote=_STRING,
 )
 _REMEDY = _object(
     kind=_enum(_literals(RemedyKind)),

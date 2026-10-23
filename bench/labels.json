@@ -1,5 +1,5 @@
 {
- "version": 1,
+ "version": 2,
  "fixtures": {
   "pure-dive": {
    "split": "dev",
@@ -74,7 +74,9 @@
    "split": "dev",
    "rules": [],
    "needs_ruling": [
-    "no_weather_clause"
+    "no_weather_clause",
+    "deduction_unspecified",
+    "deduction_conditional"
    ]
   },
   "scuba-tribe": {
@@ -97,7 +99,8 @@
         {
          "kind": "percent",
          "value": 3.5,
-         "label": "online payment processing fee"
+         "label": "online payment processing fee",
+         "quote": "minus 3.5% processing fee for online payments"
         }
        ],
        "credit_expiry_months": null
@@ -133,7 +136,8 @@
     }
    ],
    "needs_ruling": [
-    "credit_expiry_unspecified"
+    "credit_expiry_unspecified",
+    "deduction_conditional"
    ]
   },
   "wetzone": {
