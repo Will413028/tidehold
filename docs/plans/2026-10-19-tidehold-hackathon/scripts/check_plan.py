@@ -42,15 +42,28 @@ for i, m in enumerate(headers):
         continue
     end = min(headers[i + 1].start() if i + 1 < len(headers) else steps_end, steps_end)
     block, step = plan[m.start() : end], m.group(3)
-    parent = any(h.group(3) != step and re.fullmatch(rf"{step}[a-z]", h.group(3)) for h in headers)
+    # a step whose sub-steps are nested under it (8 over 8a-8c) has its acceptance in them
+    parent = any(
+        re.fullmatch(rf"{step}[a-z]", h.group(3)) and len(h.group(1)) > len(m.group(1)) for h in headers
+    )
     if "blocked by:" not in block.split("\n")[0]:
         errors.append(f"step {step} does not say what blocks it")
     for field in ("Scope", "Consumers:", "Must not change:", "Acceptance"):
         if f"- {field}" not in block:
             errors.append(f"step {step} has no {field.rstrip(':')}")
-    acceptance = " ".join(re.findall(r"- Acceptance[^:]*:(.*)", block))
-    if not parent and "mutation" not in acceptance.lower():
-        errors.append(f"step {step} has no mutation in its acceptance")
+    # the last acceptance is the one still to run; earlier ones are the record of built parts
+    acceptances = re.findall(r"- Acceptance[^:]*:(.*)", block)
+    if not parent and (not acceptances or "mutation" not in acceptances[-1].lower()):
+        errors.append(f"step {step} has no mutation in its last acceptance")
+
+STATES = ("not started", "in progress", "code done, acceptance pending", "done")
+rows = re.findall(r"^\| (\d+[a-z]?) [^|]*\|([^|]*)\|", plan[plan.index("\n## Progress") :], re.M)
+for row, state in rows:
+    if not state.strip().startswith(STATES):
+        errors.append(f"progress row {row} has a state outside {STATES}")
+row_ids = {row for row, _ in rows}
+errors += [f"step {s} has no progress row" for s in sorted(steps - row_ids)]
+errors += [f"progress row {r} names no step" for r in sorted(row_ids - steps)]
 
 if "--final" in sys.argv:
     errors += [f"step {m.group(3)} not ticked" for m in headers if m.group(2) == " "]
