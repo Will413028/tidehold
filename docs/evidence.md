@@ -110,6 +110,19 @@ TOTAL                                   411     43    106     23    86%
 
 Read: the uncovered service lines are a checkout order refused at creation (187-190), a checkout attempt closed by a concurrent reconcile (205-214) and a reconcile that skips a test-card command without a card (138-139); `holds` has no code yet.
 
+### Sandbox smoke after the D18 rewrite (2026-10-23 12:23 UTC, PayPal sandbox)
+
+On oci-a1, backend at `8c09419`, the same one-off container and throwaway `postgres:18-alpine` as the 2026-10-19 run (credentials by `--env-file`, never read or printed; `-e PAYPAL_ENV=sandbox`), both removed afterwards. `python -m tidehold.bootstrap.sandbox smoke`, exit 0:
+
+| Flow | Outcomes | State | Captured | Refunded | Refunds read back from the order by `invoice_id` | PayPal IDs |
+|---|---|---|---|---|---|---|
+| Deposit: CAPTURE with the sandbox card, then two partial refunds | succeeded, succeeded | captured | USD 30.00 | USD 25.00 | 2 of 2 listed, `COMPLETED` | order `294854529V972263S`, capture `5PP1688468866625C` |
+| Balance: CAPTURE with the sandbox card, then a refund | succeeded | captured | USD 30.00 | USD 10.00 | 1 of 1 listed, `COMPLETED` | order `37685915TK052910R`, capture `5U293273CE6568632` |
+| Balance: AUTHORIZE, then final capture of two thirds (kept until step 8c) | succeeded | captured | USD 20.00 | — | — | authorization `1PL54427FP600173F`, capture `2TJ316514E424474T` |
+| Balance: AUTHORIZE, then void (kept until step 8c) | succeeded | voided | — | — | — | authorization `8X625636T25266948` |
+
+Read: PayPal's order read lists each refund with the `invoice_id` tidehold sent, so reconciliation can find a refund whose answer was lost (plan step 4, D4). Each refund completed at once with a card capture; a `PENDING` refund was not seen. The fallback demo's `/deposits` answered 200 afterwards.
+
 ### Sandbox smoke (2026-10-19 12:24 UTC, PayPal sandbox)
 
 On oci-a1, backend at `1e09065`, one-off `ghcr.io/astral-sh/uv:0.12.23-python3.13-trixie-slim` container with the shared sandbox credentials passed by `--env-file` (D13; never read or printed) and `-e PAYPAL_ENV=sandbox` (the shared file does not set it, so the guard refused the first run), against a throwaway `postgres:18-alpine` on its own network, both removed afterwards. `python -m tidehold.bootstrap.sandbox smoke`, exit 0:
