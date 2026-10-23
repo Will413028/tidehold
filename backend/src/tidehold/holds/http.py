@@ -1,15 +1,17 @@
 """What a guest's own link shows and does: the trip, the deposit (captured through PayPal at
-booking, D3) and the balance hold (authorized once it opens, D11). Guest access class: the
-unguessable token is the only credential."""
+booking, D3) and the balance (captured when the guest pays it, payable from the invitation and
+due before the trip, D18). Guest access class: the unguessable token is the only credential."""
 
-from datetime import date, datetime
+from datetime import date
 from typing import Annotated, Literal
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Path, Request
+from psycopg.rows import DictRow
 from pydantic import BaseModel
 
-from tidehold.holds.schedule import balance_opens_at
+from tidehold.holds.schedule import balance_due_at
 from tidehold.money import service
 from tidehold.money.paypal import TEST_CARD, PayPalClient
 from tidehold.platform.db import Conn, connection
@@ -31,9 +33,10 @@ class Payment(BaseModel):
 
 
 class Balance(BaseModel):
-    opens_at: datetime
+    # the local date in the trip's time zone
+    due_on: date
     amount_minor: int
-    payment: Payment | None  # None until the hold opens
+    payment: Payment | None  # None only for a guest invited before migration 0015
 
 
 class GuestView(BaseModel):
@@ -50,6 +53,11 @@ class GuestView(BaseModel):
 
 class Order(BaseModel):
     order_id: str
+
+
+def _due_on(trip: DictRow, guest: DictRow) -> date:
+    due = balance_due_at(trip, guest["created_at"])
+    return due.astimezone(ZoneInfo(trip["timezone"])).date()
 
 
 async def _view(conn: Conn, token: str) -> GuestView:
@@ -74,7 +82,7 @@ async def _view(conn: Conn, token: str) -> GuestView:
             captured_minor=guest["deposit_captured_minor"],
         ),
         balance=Balance(
-            opens_at=balance_opens_at(trip["starts_on"], trip["days"]),
+            due_on=_due_on(trip, guest),
             amount_minor=trip["balance_minor"],
             payment=balance,
         ),
@@ -88,7 +96,7 @@ async def _payment(conn: Conn, token: str, purpose: Purpose) -> UUID:
         raise Conflict("TRIP_CANCELLED")
     payment_id: UUID | None = guest["deposit_id"] if purpose == "deposit" else guest["balance_id"]
     if payment_id is None:
-        raise Conflict("BALANCE_NOT_OPEN_YET")
+        raise Conflict("NO_BALANCE_PAYMENT")
     return payment_id
 
 

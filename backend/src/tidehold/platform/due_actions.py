@@ -22,7 +22,7 @@ from psycopg.types.json import Jsonb
 
 from tidehold.platform.db import Conn
 
-Kind = Literal["request_balance", "reconcile_payment", "check_trip", "settle_proposal", "draft_ask"]
+Kind = Literal["reconcile_payment", "check_trip", "settle_proposal", "draft_ask"]
 
 log = logging.getLogger(__name__)
 
@@ -31,7 +31,6 @@ log = logging.getLogger(__name__)
 # guest (12 guests a trip), and `draft_ask` calls a model whose timeout is 90 s
 # (`policy.providers.TIMEOUT_S`), so their leases are longer.
 LEASES: dict[Kind, timedelta] = {
-    "request_balance": timedelta(seconds=60),
     "reconcile_payment": timedelta(seconds=60),
     "check_trip": timedelta(seconds=60),
     "settle_proposal": timedelta(seconds=600),
@@ -41,7 +40,6 @@ LEASE = max(LEASES.values())
 MAX_ATTEMPTS = 8
 # What each kind acts on; the subject goes in that column (`due_actions_one_subject`).
 SUBJECT: dict[Kind, Literal["trip", "payment", "proposal"]] = {
-    "request_balance": "trip",
     "reconcile_payment": "payment",
     "check_trip": "trip",
     "settle_proposal": "proposal",
@@ -134,8 +132,7 @@ async def complete(conn: Conn, action: Action, now: datetime) -> bool:
 async def retry(conn: Conn, action: Action, now: datetime, error: str) -> bool:
     """Back off, or give up after MAX_ATTEMPTS; a failed action stays for the operator console
     (plan step 9). Whether a schedule derived from trip state recreates it is that kind's own
-    rule: `request_balance` never does, `check_trip` does, and `settle_proposal` does in the
-    whole-trip late-payment sweep."""
+    rule: `check_trip` does, and `settle_proposal` does in the whole-trip late-payment sweep."""
     failures = action.failures + 1
     failed = failures >= MAX_ATTEMPTS
     row = await (

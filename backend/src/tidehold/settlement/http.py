@@ -33,7 +33,7 @@ class NewCancellation(BaseModel):
 
     # a trip day, or the rest of the trip from that day (the whole trip from day 1)
     scope: Literal["day", "rest"]
-    trip_day: int = Field(strict=True, ge=1, le=10)
+    trip_day: int = Field(strict=True, ge=1, le=trips.MAX_TRIP_DAYS)
     cause: Literal["weather", "safety", "other"]
 
 
@@ -289,8 +289,8 @@ order by finished_at desc
 
 @router.get("/trips/{trip_id}/failed-actions")
 async def failed_actions(trip_id: UUID, workspace_id: Workspace, conn: Db) -> list[FailedAction]:
-    """Failed work stays for the operator: `request_balance` is never recreated after a
-    failure, and the recreated kinds would otherwise add a row per failure."""
+    """Failed work stays for the operator, one row per kind and subject: the kinds recreated
+    from trip state would otherwise add a row per failure."""
     await trips.trip(conn, workspace_id, trip_id)
     rows = await (await conn.execute(FAILED, {"trip": trip_id})).fetchall()
     return [FailedAction(**row) for row in rows]

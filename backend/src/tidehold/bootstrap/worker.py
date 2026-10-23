@@ -6,7 +6,6 @@ import logging
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
-from tidehold.holds import schedule
 from tidehold.money import service
 from tidehold.money.paypal import PayPalClient
 from tidehold.platform import due_actions as due
@@ -36,7 +35,6 @@ def handlers(
         await drafts.draft_due(conn, action, now, drafter)
 
     return {
-        "request_balance": schedule.request_balance,
         "reconcile_payment": reconcile_payment,
         "check_trip": watch.check_trip,
         "settle_proposal": settle_proposal,
@@ -45,7 +43,6 @@ def handlers(
 
 
 async def tick(conn: Conn, run: Mapping[due.Kind, due.Handler], now: datetime) -> int:
-    await schedule.ensure_schedules(conn)
     await watch.ensure_schedules(conn, now)
     await execute.ensure_schedules(conn, now)
     return await due.run_due(conn, run, now)

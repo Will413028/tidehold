@@ -42,6 +42,47 @@ Read: NWS gale and storm warnings and MeteoAlarm wind warnings are recorded trig
 
 `openmeteo.fetch` for Anilao (13.7565, 120.9137), 2026-10-19 to 10-21: daily `wave_height_max` 0.26, 0.14 and 0.80 m (`https://marine-api.open-meteo.com/v1/marine?latitude=13.75650&longitude=120.91370&daily=wave_height_max&timezone=UTC&start_date=2026-10-19&end_date=2026-10-21`).
 
+## Step 6: trips, guests and the balance payment
+
+### Coverage after the D18 rewrite (2026-10-23, report only)
+
+`make coverage` on `feat/step6-balance-before-trip` (269 backend tests, PostgreSQL 18 in a container; run in the implementing cloud session, to be rerun locally), money, holds and settlement:
+
+```
+Name                                   Stmts   Miss Branch BrPart  Cover
+src/tidehold/holds/__init__.py             0      0      0      0   100%
+src/tidehold/holds/http.py                86      1      8      2    97%
+src/tidehold/holds/schedule.py             8      0      0      0   100%
+src/tidehold/money/__init__.py             0      0      0      0   100%
+src/tidehold/money/amounts.py              3      0      0      0   100%
+src/tidehold/money/commands.py           155     11     54     10    90%
+src/tidehold/money/paypal.py             168      5     20      3    96%
+src/tidehold/money/service.py            244     46     92     13    79%
+src/tidehold/settlement/__init__.py        0      0      0      0   100%
+src/tidehold/settlement/drafts.py         43      3      6      1    92%
+src/tidehold/settlement/evaluate.py      151      0     44      2    99%
+src/tidehold/settlement/execute.py       159      7     72      7    94%
+src/tidehold/settlement/guest.py          73      1     20      1    98%
+src/tidehold/settlement/http.py          200      1     12      2    99%
+src/tidehold/settlement/matching.py       20      0      2      0   100%
+src/tidehold/settlement/plan.py           35      2     12      3    89%
+src/tidehold/settlement/proposals.py     195     13     66     11    90%
+src/tidehold/settlement/watch.py          73      5     24      5    90%
+TOTAL                                   1613     95    432     60    92%
+```
+
+Read: `holds/http.py`'s uncovered line and branch are a guest without a balance payment (only guests invited before migration 0015; `NO_BALANCE_PAYMENT`).
+
+### Mutation of the D18 rewrite (2026-10-23, cloud session)
+
+| Mutation | Tests that failed |
+|---|---|
+| Due date counted from the last trip day (`starts_on + days - 1`) | `test_the_balance_falls_due_its_days_before_the_first_local_trip_day` (all three cases), `test_a_zero_day_balance_falls_due_when_the_first_local_trip_day_begins`, `test_a_guest_gets_its_balance_payment_at_invitation` |
+
+### Browser check of the PayPal checkouts (pending: needs the developer)
+
+Not run: needs the sandbox credentials on a stack the developer's browser reaches. To record here: the date, commit, and for the deposit and then the balance of one guest: PayPal's popup opened from "Pay the deposit" and "Pay the balance", the sandbox buyer approved, the page showing "Deposit: USD …: paid" and "Balance: USD …: paid", and the trip's timeline listing `open_succeeded` for both payments.
+
 ## Step 4: money engine port
 
 ### Coverage after the D18 rewrite (2026-10-23, report only)

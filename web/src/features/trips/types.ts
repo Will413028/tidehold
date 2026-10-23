@@ -18,7 +18,7 @@ export type Trip = {
   warning_areas: string[];
   deposit_minor: number;
   balance_minor: number;
-  balance_requested_at: string | null;
+  balance_due_days: number;
   policy_version_id: string;
   policy_product: string | null;
   timezone: string;

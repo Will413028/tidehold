@@ -1,7 +1,9 @@
-"""Trips, guests and balance holds through HTTP and the worker (plan step 6 acceptance)."""
+"""Trips, guests and their deposit and balance payments through HTTP and the worker (plan step 6
+acceptance)."""
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -13,9 +15,6 @@ from tidehold.bootstrap.app import create_app
 from tidehold.platform.db import Conn
 from tidehold.platform.settings import Settings
 from tidehold.trips import store
-
-# TRIP starts 2026-12-05 for 3 days: its balance opens at T-(29 - 3) = 2026-11-09 00:00 UTC.
-OPENS = datetime(2026, 11, 9, tzinfo=UTC)
 
 
 async def _tick(conn: Conn, paypal: FakePayPal, now: datetime) -> None:
@@ -29,44 +28,60 @@ async def _invite(operator: AsyncClient, trip: dict[str, Any], name: str = "Ana"
     return token
 
 
-async def test_the_balance_hold_opens_at_t_minus_29_minus_n(
-    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+async def test_a_guest_gets_its_balance_payment_at_invitation(
+    operator: AsyncClient, client: AsyncClient, conn: Conn
 ) -> None:
-    token = await _invite(operator, TRIP)
+    starts_on = datetime.now(ZoneInfo("Asia/Manila")).date() + timedelta(days=60)
+    token = await _invite(operator, trip_starting(starts_on))
 
-    await _tick(conn, paypal, OPENS - timedelta(seconds=1))
-    early = await client.post(f"/api/guest/{token}/balance/test-card")
-    before = (await client.get(f"/api/guest/{token}")).json()["balance"]
-    await _tick(conn, paypal, OPENS)
-    opened = (await client.get(f"/api/guest/{token}")).json()["balance"]
-    held = (await client.post(f"/api/guest/{token}/balance/test-card")).json()["balance"]
+    balance = (await client.get(f"/api/guest/{token}")).json()["balance"]
+    guest = await store.guest_by_token(conn, token)
+    row = await (
+        await conn.execute("select intent from payments where id = %s", (guest["balance_id"],))
+    ).fetchone()
 
-    assert (early.status_code, early.json()) == (409, {"detail": "BALANCE_NOT_OPEN_YET"})
-    assert before["payment"] is None
-    assert before["opens_at"] == "2026-11-09T00:00:00Z"
-    assert opened["payment"]["state"] == "pending"
-    assert held["payment"] == {"state": "authorized", "amount_minor": 30000, "captured_minor": 0}
+    # due 30 days before the first trip day, a local date in Asia/Manila
+    assert balance == {
+        "due_on": (starts_on - timedelta(days=30)).isoformat(),
+        "amount_minor": 30000,
+        "payment": {"state": "pending", "amount_minor": 30000, "captured_minor": 0},
+    }
+    assert row is not None
+    assert row["intent"] == "capture"
 
 
-async def test_a_trip_booked_inside_the_window_opens_at_the_next_tick(
-    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+async def test_the_balance_is_captured_when_the_guest_pays(
+    operator: AsyncClient, client: AsyncClient, paypal: FakePayPal
 ) -> None:
-    token = await _invite(operator, trip_starting(date(2026, 11, 20)))
+    by_card = await _invite(operator, TRIP)
+    by_checkout = await _invite(operator, TRIP, name="Ben")
 
-    await _tick(conn, paypal, datetime(2026, 11, 1, 12, tzinfo=UTC))
+    card = (await client.post(f"/api/guest/{by_card}/balance/test-card")).json()["balance"]
+    order = (await client.post(f"/api/guest/{by_checkout}/balance/checkout")).json()["order_id"]
+    done = await client.post(f"/api/guest/{by_checkout}/balance/checkout/{order}")
 
-    assert (await client.get(f"/api/guest/{token}")).json()["balance"]["payment"] is not None
+    paid = {"state": "captured", "amount_minor": 30000, "captured_minor": 30000}
+    assert card["payment"] == paid
+    assert done.json()["balance"]["payment"] == paid
+    assert {o["intent"] for o in paypal.orders.values()} == {"CAPTURE"}
 
 
-async def test_a_guest_invited_after_the_balance_opened_gets_a_balance_payment(
-    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+@pytest.mark.parametrize("days", [-1, 121, "30", 30.0])
+async def test_balance_due_days_outside_0_to_120_are_refused(
+    operator: AsyncClient, days: object
 ) -> None:
-    trip = (await post_trip(operator)).json()
-    await _tick(conn, paypal, OPENS)
+    response = await post_trip(operator, balance_due_days=days)
 
-    invited = await operator.post(f"/api/trips/{trip['id']}/guests", json={"name": "Ben"})
+    assert (response.status_code, response.json()) == (400, {"detail": "INVALID_REQUEST"})
 
-    assert invited.json()["guests"][0]["balance_state"] == "pending"
+
+@pytest.mark.parametrize("days", [0, 120])
+async def test_balance_due_days_at_their_bounds_are_accepted(
+    operator: AsyncClient, days: int
+) -> None:
+    response = await post_trip(operator, balance_due_days=days)
+
+    assert (response.status_code, response.json()["balance_due_days"]) == (201, days)
 
 
 async def test_the_deposit_capture_is_recorded_with_its_money_command(
@@ -130,8 +145,6 @@ async def test_judge_flow_and_workspace_isolation(
     operator: AsyncClient,
     other_operator: AsyncClient,
     client: AsyncClient,
-    conn: Conn,
-    paypal: FakePayPal,
 ) -> None:
     """Ported from dive-trip-agent@8065eba tests/test_deposits_http.py: the operator sets up a
     trip, a guest pays deposit and balance, and another workspace sees none of it."""
@@ -141,12 +154,11 @@ async def test_judge_flow_and_workspace_isolation(
 
     order = (await client.post(f"/api/guest/{token}/deposit/checkout")).json()["order_id"]
     await client.post(f"/api/guest/{token}/deposit/checkout/{order}")
-    await _tick(conn, paypal, OPENS)
     await client.post(f"/api/guest/{token}/balance/test-card")
     seen = (await operator.get(f"/api/trips/{trip['id']}")).json()
 
     assert [(g["name"], g["deposit_state"], g["balance_state"]) for g in seen["guests"]] == [
-        ("Judge", "captured", "authorized")
+        ("Judge", "captured", "captured")
     ]
     assert (await other_operator.get(f"/api/trips/{trip['id']}")).status_code == 404
     assert (await other_operator.get("/api/trips")).json() == []
@@ -211,9 +223,11 @@ async def test_without_paypal_credentials_payments_are_unavailable(
         transport=transport, base_url="http://test", headers={"Origin": "http://test"}
     ) as guest:
         paid = await guest.post(f"/api/guest/{token}/deposit/test-card")
+        balance = await guest.post(f"/api/guest/{token}/balance/test-card")
         config = await guest.get("/api/paypal/config")
 
     assert (paid.status_code, paid.json()) == (501, {"detail": "PAYPAL_NOT_CONFIGURED"})
+    assert (balance.status_code, balance.json()) == (501, {"detail": "PAYPAL_NOT_CONFIGURED"})
     assert config.json() == {"client_id": None}
 
 
@@ -228,5 +242,6 @@ async def test_the_trip_timeline_lists_each_guests_money_events(
 
     assert [(e["guest"], e["purpose"], e["kind"]) for e in events] == [
         ("Ana", "deposit", "payment_created"),
+        ("Ana", "balance", "payment_created"),
         ("Ana", "deposit", "open_succeeded"),
     ]

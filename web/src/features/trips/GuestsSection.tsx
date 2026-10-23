@@ -10,7 +10,7 @@ type Guest = Trip["guests"][number];
 const COLUMNS: Column<Guest>[] = [
   { headerName: "Guest", field: "name" },
   { headerName: "Deposit", field: "deposit_state" },
-  { headerName: "Balance", valueGetter: ({ data }) => data?.balance_state ?? "not open" },
+  { headerName: "Balance", valueGetter: ({ data }) => data?.balance_state ?? "no payment" },
   {
     headerName: "Link",
     maxWidth: 80,

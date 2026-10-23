@@ -30,7 +30,7 @@ POLICY: dict[str, Any] = {
     ],
 }
 
-# A trip far enough out that its balance hold is not open yet (T-(29 - N) is in the future).
+# A trip far enough out that its balance is not due yet (due 2026-11-05, 30 days before).
 TRIP: dict[str, Any] = {
     "name": "Anilao weekend",
     "starts_on": "2026-12-05",

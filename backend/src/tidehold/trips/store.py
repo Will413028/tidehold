@@ -1,5 +1,6 @@
-"""Trips and their invited guests. Each guest owns a deposit payment from the invitation and
-a balance payment once the balance hold is requested (`holds` decides when)."""
+"""Trips and their invited guests. Each guest owns a deposit payment and a balance payment
+from the invitation; both are captured when the guest pays (D3, D18; `holds` says when the
+balance falls due)."""
 
 import secrets
 from dataclasses import dataclass
@@ -14,8 +15,9 @@ from tidehold.platform.db import Conn, insert_returning
 from tidehold.platform.errors import Conflict, Invalid, LimitReached, NotFound
 from tidehold.policy import versions
 
-# Longer trips cannot settle inside one PayPal authorization (deposit/balance ADR).
-MAX_TRIP_DAYS = 10
+# An input bound covering the longest trips found (liveaboards of about two weeks), not a
+# PayPal limit (D20).
+MAX_TRIP_DAYS = 21
 # Bounds on what one anonymous workspace can create on the shared sandbox (threat model).
 MAX_TRIPS_PER_WORKSPACE = 20
 MAX_GUESTS_PER_TRIP = 12
@@ -37,6 +39,7 @@ class NewTrip:
     mandate_guest_minor: int
     mandate_trip_minor: int
     policy_product: str | None = None
+    balance_due_days: int = 30
 
 
 def ends_on(starts_on: date, days: int) -> date:
@@ -80,8 +83,9 @@ async def create_trip(conn: Conn, workspace_id: UUID, trip: NewTrip) -> UUID:
             conn,
             "insert into trips (workspace_id, name, starts_on, days, site_lat, site_lon,"
             " warning_source, warning_areas, deposit_minor, balance_minor, policy_version_id,"
-            " policy_product, timezone, mandate_guest_minor, mandate_trip_minor)"
-            " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) returning id",
+            " policy_product, timezone, mandate_guest_minor, mandate_trip_minor, balance_due_days)"
+            " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            " returning id",
             (
                 workspace_id,
                 trip.name,
@@ -98,6 +102,7 @@ async def create_trip(conn: Conn, workspace_id: UUID, trip: NewTrip) -> UUID:
                 trip.timezone,
                 trip.mandate_guest_minor,
                 trip.mandate_trip_minor,
+                trip.balance_due_days,
             ),
         )
     trip_id: UUID = row["id"]
@@ -125,7 +130,7 @@ async def trips(conn: Conn, workspace_id: UUID) -> list[DictRow]:
 
 
 GUEST_PAYMENTS = (
-    "select g.id, g.name, g.token, g.trip_id, g.workspace_id,"
+    "select g.id, g.name, g.token, g.trip_id, g.workspace_id, g.created_at,"
     " d.id as deposit_id, d.state as deposit_state, d.amount_minor as deposit_minor,"
     " d.captured_minor as deposit_captured_minor, d.refunded_minor as deposit_refunded_minor,"
     " b.id as balance_id, b.state as balance_state, b.amount_minor as balance_minor,"
@@ -145,7 +150,7 @@ async def guests(conn: Conn, trip_id: UUID) -> list[DictRow]:
 
 async def cancel_whole_trip(conn: Conn, trip_id: UUID, now: datetime) -> None:
     """Mark the trip cancelled as a whole (by settlement, under the trip row's lock): no guest
-    is invited, no balance opens and no payment starts after it."""
+    is invited and no payment starts after it."""
     await conn.execute(
         "update trips set cancelled_at = coalesce(cancelled_at, %s) where id = %s", (now, trip_id)
     )
@@ -164,12 +169,11 @@ async def guest_by_token(conn: Conn, token: str) -> DictRow:
 
 
 async def invite(conn: Conn, workspace_id: UUID, trip_id: UUID, name: str) -> UUID:
-    """A guest with their own link and a deposit payment; a balance payment too when the trip's
-    balance hold is already open."""
+    """A guest with their own link, a deposit payment and a balance payment."""
     async with conn.transaction():
         row = await (
             await conn.execute(
-                "select deposit_minor, balance_requested_at, cancelled_at from trips"
+                "select deposit_minor, balance_minor, cancelled_at from trips"
                 " where id = %s and workspace_id = %s for update",
                 (trip_id, workspace_id),
             )
@@ -196,56 +200,21 @@ async def invite(conn: Conn, workspace_id: UUID, trip_id: UUID, name: str) -> UU
             intent="capture",
             amount_minor=row["deposit_minor"],
         )
+        balance = await commands.create_payment(
+            conn,
+            workspace_id=workspace_id,
+            purpose="balance",
+            intent="capture",
+            amount_minor=row["balance_minor"],
+        )
         guest = await insert_returning(
             conn,
-            "insert into guests (workspace_id, trip_id, name, token, deposit_payment_id)"
-            " values (%s, %s, %s, %s, %s) returning id",
-            (workspace_id, trip_id, name, secrets.token_urlsafe(24), deposit),
+            "insert into guests (workspace_id, trip_id, name, token, deposit_payment_id,"
+            " balance_payment_id) values (%s, %s, %s, %s, %s, %s) returning id",
+            (workspace_id, trip_id, name, secrets.token_urlsafe(24), deposit, balance),
         )
-        if row["balance_requested_at"] is not None:
-            await _open_balances(conn, trip_id)
     guest_id: UUID = guest["id"]
     return guest_id
-
-
-async def open_balances(conn: Conn, trip_id: UUID, now: datetime) -> int:
-    """Open the trip's balance hold: mark it requested and give every guest a balance payment.
-    Idempotent; returns how many payments it created. A trip cancelled as a whole opens none."""
-    async with conn.transaction():
-        opened = await (
-            await conn.execute(
-                "update trips set balance_requested_at = coalesce(balance_requested_at, %s)"
-                " where id = %s and cancelled_at is null returning id",
-                (now, trip_id),
-            )
-        ).fetchone()
-        if opened is None:
-            return 0
-        return await _open_balances(conn, trip_id)
-
-
-async def _open_balances(conn: Conn, trip_id: UUID) -> int:
-    pending = await (
-        await conn.execute(
-            "select g.id, g.workspace_id, t.balance_minor from guests g"
-            " join trips t on t.id = g.trip_id"
-            " where g.trip_id = %s and g.balance_payment_id is null for update of g",
-            (trip_id,),
-        )
-    ).fetchall()
-    for guest in pending:
-        payment = await commands.create_payment(
-            conn,
-            workspace_id=guest["workspace_id"],
-            purpose="balance",
-            # held until plan step 6 makes the balance a capture (D18)
-            intent="authorize",
-            amount_minor=guest["balance_minor"],
-        )
-        await conn.execute(
-            "update guests set balance_payment_id = %s where id = %s", (payment, guest["id"])
-        )
-    return len(pending)
 
 
 async def timeline(conn: Conn, workspace_id: UUID, trip_id: UUID) -> list[DictRow]:

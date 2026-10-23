@@ -35,21 +35,18 @@ async function fitsTheScreen(page: Page) {
   expect(overflow, `${page.url()} is wider than the screen`).toBeLessThanOrEqual(0);
 }
 
-/** A guest pays the deposit, then holds the balance once it opens, with the sandbox test card. */
+/** A guest pays the deposit, then the balance, with the sandbox test card. */
 async function guestPays(page: Page, link: string) {
   await page.goto(link);
   await page.getByRole("button", { name: "Use the sandbox test card" }).click();
   await expect(page.getByText("Deposit: USD 50.00: paid")).toBeVisible();
-  // the trip starts today, so its balance hold opens on the worker's next tick
-  await expect(async () => {
-    await page.reload();
-    await expect(page.getByRole("heading", { name: /Hold the balance/ })).toBeVisible({ timeout: 1_000 });
-  }).toPass({ timeout: 30_000 });
+  // payable from the invitation: no worker tick to wait for
+  await expect(page.getByRole("heading", { name: "Pay the balance" })).toBeVisible();
   await page.getByRole("button", { name: "Use the sandbox test card" }).click();
-  await expect(page.getByText("held (authorized, not charged)")).toBeVisible();
+  await expect(page.getByText("Balance: USD 300.00: paid")).toBeVisible();
 }
 
-test("the demo path: compile, trip, guests hold, a recorded gale, the operator's cancellation, the guest page", async ({
+test("the demo path: compile, trip, guests pay, a recorded gale, the operator's cancellation, the guest page", async ({
   page,
 }) => {
   test.setTimeout(120_000);
@@ -107,7 +104,8 @@ test("the demo path: compile, trip, guests hold, a recorded gale, the operator's
     .getByRole("button")
     .click();
   const decision = page.getByRole("region", { name: "Decision" });
-  await expect(decision.getByRole("group", { name: "Balance" })).toContainText("Ana: release USD 150.00");
+  // until step 8b, step 8a settles only a held balance, so a paid one gets nothing yet
+  await expect(decision.getByRole("group", { name: "Balance" })).toContainText("Ana: nothing");
   await decision.getByRole("button", { name: "Accept these options" }).click();
   await expect(waiting).not.toContainText("Cancelled day 1");
   await fitsTheScreen(page);
@@ -120,7 +118,7 @@ test("the demo path: compile, trip, guests hold, a recorded gale, the operator's
   );
   await expect(cancellations.getByRole("list", { name: "Your outcome" }).getByRole("listitem")).toHaveText([
     "Your deposit: USD 25.00 refunded",
-    "Your balance: USD 150.00 released",
+    "Your balance: no change",
   ]);
   await expect(cancellations).toContainText(/recorded at .* UTC, replayed/);
   await expect(cancellations).not.toContainText("Ben");

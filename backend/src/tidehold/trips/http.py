@@ -53,6 +53,8 @@ class NewTrip(BaseModel):
     # the most the trip's settlements may return without the operator (step 8a)
     mandate_guest_minor: Cap
     mandate_trip_minor: Cap
+    # the balance falls due this many days before the first local trip day (D18, D20)
+    balance_due_days: int = Field(default=30, strict=True, ge=0, le=120)
 
 
 class NewGuest(BaseModel):
@@ -81,7 +83,7 @@ class Trip(BaseModel):
     warning_areas: list[str]
     deposit_minor: int
     balance_minor: int
-    balance_requested_at: datetime | None
+    balance_due_days: int
     policy_version_id: UUID
     policy_product: str | None
     timezone: str

@@ -132,6 +132,17 @@ async def _trip(
     return trip_row
 
 
+async def _balances_held(conn: Conn, trip_id: str) -> None:
+    """Make the trip's unpaid balances holds (AUTHORIZE), as they were before plan step 6:
+    step 8a's settlement voids and releases holds, and these tests keep covering that code
+    until step 8b settles captured balances (developer, 2026-10-23)."""
+    await conn.execute(
+        "update payments set intent = 'authorize' where state = 'pending' and id in ("
+        " select balance_payment_id from guests where trip_id = %s)",
+        (trip_id,),
+    )
+
+
 async def _guest(
     operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal, trip_id: str
 ) -> str:
@@ -140,6 +151,7 @@ async def _guest(
     token: str = invited.json()["guests"][-1]["token"]
     assert (await client.post(f"/api/guest/{token}/deposit/test-card")).status_code == 200
     await _tick(conn, paypal)
+    await _balances_held(conn, trip_id)
     held = await client.post(f"/api/guest/{token}/balance/test-card")
     assert held.json()["balance"]["payment"]["state"] == "authorized", held.text
     return token
@@ -733,6 +745,7 @@ async def test_a_refund_refused_when_recorded_asks_and_the_other_guests_are_refu
     ben = await operator.post(f"/api/trips/{trip['id']}/guests", json={"name": "Ben"})
     token = ben.json()["guests"][-1]["token"]
     assert (await client.post(f"/api/guest/{token}/deposit/test-card")).status_code == 200
+    await _balances_held(conn, trip["id"])
     assert (await client.post(f"/api/guest/{token}/balance/test-card")).status_code == 200
     ana, _ = await _deposits(conn, trip["id"])
     await _age_capture(conn, ana["id"], 181)
@@ -966,7 +979,7 @@ async def test_a_trip_cancelled_as_a_whole_takes_no_new_guest_hold_or_payment(
     late_invite = await operator.post(f"/api/trips/{trip['id']}/guests", json={"name": "Bo"})
     late_pay = await client.post(f"/api/guest/{token}/balance/test-card")
 
-    assert (await _guest_view(client, token))["balance"]["payment"] is None
+    assert (await _guest_view(client, token))["balance"]["payment"]["state"] == "pending"
     assert (late_invite.status_code, late_invite.json()) == (409, {"detail": "TRIP_CANCELLED"})
     assert (late_pay.status_code, late_pay.json()) == (409, {"detail": "TRIP_CANCELLED"})
 
@@ -977,7 +990,8 @@ async def test_payments_placed_while_the_trip_was_being_cancelled_are_released_o
     trip = await _trip(operator, [WHOLE_TRIP_RULE])
     await operator.post(f"/api/trips/{trip['id']}/guests", json={"name": "Ana"})
     await operator.post(f"/api/trips/{trip['id']}/guests", json={"name": "Bo"})
-    await _tick(conn, paypal)  # Ana's and Bo's balances open, neither is placed
+    await _tick(conn, paypal)
+    await _balances_held(conn, trip["id"])  # neither balance is placed
     guests = await (
         await conn.execute(
             "select name, deposit_payment_id, balance_payment_id from guests where trip_id = %s",
@@ -1028,6 +1042,7 @@ async def test_a_payment_that_lands_after_the_settlement_ran_is_still_released(
     trip = await _trip(operator, [WHOLE_TRIP_RULE])
     await operator.post(f"/api/trips/{trip['id']}/guests", json={"name": "Ana"})
     await _tick(conn, paypal)
+    await _balances_held(conn, trip["id"])
     balance = await (
         await conn.execute(
             "select balance_payment_id from guests where trip_id = %s", (trip["id"],)

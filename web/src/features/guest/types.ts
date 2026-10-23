@@ -11,7 +11,8 @@ export type GuestView = {
   ends_on: string;
   days: number;
   deposit: PaymentView;
-  balance: { opens_at: string; amount_minor: number; payment: PaymentView | null };
+  /** `due_on` is a local date in the trip's time zone; `payment` is null only for a guest invited before the balance was payable from invitation */
+  balance: { due_on: string; amount_minor: number; payment: PaymentView | null };
 };
 
 export type Purpose = "deposit" | "balance";

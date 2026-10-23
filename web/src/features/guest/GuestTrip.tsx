@@ -14,8 +14,8 @@ const STATE: Record<PaymentView["state"], string> = {
 
 function balanceLine(view: GuestView): string {
   const { balance } = view;
-  if (balance.payment === null) {
-    return `${formatUsd(balance.amount_minor)}, held from ${balance.opens_at.slice(0, 10)} (29 days before your last trip day)`;
+  if (balance.payment === null || balance.payment.state === "pending") {
+    return `${formatUsd(balance.amount_minor)}, due ${balance.due_on}`;
   }
   return `${formatUsd(balance.amount_minor)}: ${STATE[balance.payment.state]}`;
 }

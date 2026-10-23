@@ -65,7 +65,7 @@ export function TripForm({
         Starts on <input name="starts_on" type="date" required />
       </label>
       <label>
-        Days <input name="days" type="number" min={1} max={10} defaultValue={1} required />
+        Days <input name="days" type="number" min={1} max={21} defaultValue={1} required />
       </label>
       <label>
         Time zone{" "}

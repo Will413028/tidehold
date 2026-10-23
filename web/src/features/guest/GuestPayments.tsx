@@ -8,7 +8,7 @@ import type { Purpose } from "./types";
 
 const LABEL: Record<Purpose, string> = {
   deposit: "Pay the deposit",
-  balance: "Hold the balance (authorized now, charged only per the policy after the trip)",
+  balance: "Pay the balance",
 };
 
 export function GuestPayments({ token, purpose }: { token: string; purpose: Purpose }) {

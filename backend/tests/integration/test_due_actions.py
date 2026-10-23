@@ -15,7 +15,7 @@ T0 = datetime(2026, 11, 1, 9, 0, tzinfo=UTC)
 async def _payment(conn: Conn) -> UUID:
     workspace, _ = await new_workspace(conn)
     return await commands.create_payment(
-        conn, workspace_id=workspace, purpose="balance", intent="authorize", amount_minor=1000
+        conn, workspace_id=workspace, purpose="balance", intent="capture", amount_minor=1000
     )
 
 
@@ -96,7 +96,7 @@ async def test_scheduling_the_same_work_twice_keeps_one_action(conn: Conn) -> No
 async def test_each_kind_is_claimed_under_its_own_lease(conn: Conn) -> None:
     await due.schedule(conn, "reconcile_payment", await _payment(conn), due_at=T0)
     leases: dict[due.Kind, timedelta] = {
-        "request_balance": timedelta(minutes=5),
+        "check_trip": timedelta(minutes=5),
         "reconcile_payment": timedelta(seconds=7),
     }
 

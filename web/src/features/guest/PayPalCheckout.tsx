@@ -1,7 +1,7 @@
 "use client";
 
-// Ported from dive-trip-agent@8065eba src/features/deposits/PayPalCheckout.tsx: the deposit is a
-// CAPTURE order and the balance an AUTHORIZE order (D3, D11), so the SDK is loaded per intent.
+// Ported from dive-trip-agent@8065eba src/features/deposits/PayPalCheckout.tsx: the deposit and
+// the balance are both CAPTURE orders (D3, D18), so one SDK load serves both.
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api } from "@/lib/api";
 import type { Purpose } from "./types";
@@ -22,18 +22,16 @@ type PayPalNamespace = {
   }): PayPalButtons;
 };
 
-type Intent = "capture" | "authorize";
-const INTENT: Record<Purpose, Intent> = { deposit: "capture", balance: "authorize" };
-const sdks = new Map<Intent, Promise<PayPalNamespace>>();
+const NAMESPACE = "paypal_capture";
+let sdk: Promise<PayPalNamespace> | null = null;
 
-function loadSdk(clientId: string, intent: Intent): Promise<PayPalNamespace> {
-  const cached = sdks.get(intent);
-  if (cached !== undefined) return cached;
+function loadSdk(clientId: string): Promise<PayPalNamespace> {
+  if (sdk !== null) return sdk;
   const loading = new Promise<PayPalNamespace>((resolve, reject) => {
     const params = new URLSearchParams({
       "client-id": clientId,
       currency: "USD",
-      intent,
+      intent: "capture",
       components: "buttons",
       "enable-funding": "card",
       "disable-funding": "paylater,venmo",
@@ -41,20 +39,19 @@ function loadSdk(clientId: string, intent: Intent): Promise<PayPalNamespace> {
     const script = document.createElement("script");
     script.src = `https://www.paypal.com/sdk/js?${params}`;
     script.async = true;
-    // Each intent gets its own namespace, so a page that loaded the other one keeps working.
-    script.dataset.namespace = `paypal_${intent}`;
+    script.dataset.namespace = NAMESPACE;
     script.onload = () => {
-      const sdk = (window as unknown as Record<string, PayPalNamespace | undefined>)[`paypal_${intent}`];
-      if (sdk) resolve(sdk);
+      const loaded = (window as unknown as Record<string, PayPalNamespace | undefined>)[NAMESPACE];
+      if (loaded) resolve(loaded);
       else reject(new Error("PAYPAL_SDK_MISSING"));
     };
     script.onerror = () => {
-      sdks.delete(intent);
+      sdk = null;
       reject(new Error("PAYPAL_SDK_UNAVAILABLE"));
     };
     document.head.append(script);
   });
-  sdks.set(intent, loading);
+  sdk = loading;
   return loading;
 }
 
@@ -93,7 +90,7 @@ export function PayPalCheckout({
     // PayPal may hand onError its own error instead of ours, so keep what the server said.
     let refused: unknown = null;
     const base = `/api/guest/${encodeURIComponent(token)}/${purpose}/checkout`;
-    loadSdk(clientId, INTENT[purpose])
+    loadSdk(clientId)
       .then(async (paypal) => {
         if (cancelled || !container.current) return;
         buttons = paypal.Buttons({
@@ -115,7 +112,7 @@ export function PayPalCheckout({
               latest.current.onError(describe(error));
             }
           },
-          onCancel: () => latest.current.onError("Checkout cancelled; nothing was charged or held."),
+          onCancel: () => latest.current.onError("Checkout cancelled; nothing was charged."),
           onError: (error) => latest.current.onError(describe(refused ?? error)),
         });
         if (!buttons.isEligible()) {
