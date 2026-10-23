@@ -1,6 +1,7 @@
-# `make check` is the full gate, run by CI. Before every push lefthook runs `make check-local`
-# (everything but the browser tests, which run only in CI) with `make security`.
-.PHONY: check check-local locks-local reports lint typecheck arch unit integration e2e locks coverage security dev-db dev-backend dev-web
+# `make check` is the local gate, run by lefthook before every push with `make security`: every
+# suite but the browser tests. `make ci` adds them and is run only by CI; nothing on the
+# developer's machine runs `make e2e`.
+.PHONY: check ci locks-local reports lint typecheck arch unit integration e2e locks coverage security dev-db dev-backend dev-web
 
 WEB := pnpm --dir web
 # Test reports read by `locks`; `check` starts from an empty directory so a suite that stops
@@ -9,9 +10,9 @@ REPORTS := $(CURDIR)/build/test-reports
 # unittest prints its summary to stderr: keep it for `locks`, show it, keep the exit status.
 UNITTEST = python3 -m unittest -q $(1) 2> $(REPORTS)/$(2).txt; s=$$?; cat $(REPORTS)/$(2).txt >&2; exit $$s
 
-check: reports lint typecheck arch unit integration e2e locks
+check: reports lint typecheck arch unit integration locks-local
 
-check-local: reports lint typecheck arch unit integration locks-local
+ci: reports lint typecheck arch unit integration e2e locks
 
 reports:
 	rm -rf $(REPORTS) && mkdir -p $(REPORTS)

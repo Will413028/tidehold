@@ -11,7 +11,7 @@
 - Product contract in `AGENTS.md` is binding: model never supplies amounts; every rule cites a verified verbatim span; unruled clauses never auto-execute; settlement starts only from the operator's recorded cancellation, and an official CAP warning is a condition matched in code, never a trigger on its own (D16); Open-Meteo only corroborates; money moves only as captures the guest makes and as refunds or credit code computes, and a payment's refunds never exceed what it captured (D18); sandbox and synthetic guests only; attributed quotes and a neutral fictional demo operator.
 - Provider keys and PayPal credentials stay server-side and out of git; nobody prints them; live model calls use synthetic data only.
 - The dive-trip-agent fallback stack on the VM (compose project `dive-deposits-demo`, its nightly timer at 10:00 UTC, its secrets) is never modified by this plan.
-- Every step after step 3 is accepted through `make check` plus the step's own commands; a step is ticked only after its acceptance ran in the orchestrator's environment; measurements and sandbox runs go to `docs/evidence.md`.
+- Every step after step 3 is accepted through `make check` plus the step's own commands, and its browser tests through CI's `make ci` (they never run on the developer's machine, 2026-10-23); a step is ticked only after its acceptance ran in the orchestrator's environment; measurements and sandbox runs go to `docs/evidence.md`.
 - Definition of done per product step: tests for the new behavior including one mutation that must fail; README or docs updated where behavior is user-visible; audit timeline covers new money or evidence events.
 
 ## Premises (checked 2026-10-19; the PayPal premise rewritten 2026-10-23 for D18)

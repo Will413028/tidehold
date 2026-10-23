@@ -5,7 +5,7 @@
 pre-push:
   commands:
     check:
-      run: make check-local
+      run: make check
     security:
       run: make security
     # A commit that loosens quality-lock.json must say why (Quality-lock-reason: line).

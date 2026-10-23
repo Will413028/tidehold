@@ -36,7 +36,7 @@ jobs:
       - run: pnpm --dir web install --frozen-lockfile
       # system libraries for Chromium; make e2e downloads the browser itself
       - run: pnpm --dir web exec playwright install-deps chromium
-      - run: make check
+      - run: make ci
       - name: A commit that loosens quality-lock.json says why
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
