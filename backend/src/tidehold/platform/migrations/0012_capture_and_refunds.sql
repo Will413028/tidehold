@@ -52,4 +52,3 @@ create unique index money_commands_once on money_commands
 create unique index money_commands_one_refund_per_proposal on money_commands
     (proposal_id, payment_id)
     where kind = 'refund' and status <> 'rejected';
-
