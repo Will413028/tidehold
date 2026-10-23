@@ -8,6 +8,7 @@ without a `Quality-lock-reason:` line in its message.
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -35,6 +36,13 @@ SKIP = {LOCK, "scripts/quality_lock.py", "scripts/test_quality_lock.py"}
 SKIP_SUFFIXES = (".md", ".lock", "-lock.yaml")
 
 
+def git_env() -> dict[str, str]:
+    """The environment without the repository a git hook exports (`GIT_DIR`, `GIT_INDEX_FILE`,
+    `GIT_WORK_TREE`, ...), so `git -C root` acts on `root`: lefthook runs in a linked worktree
+    with them pointing at the pushing repository."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 def tracked_files(root: Path) -> list[str]:
     out = subprocess.run(
         # Untracked files too, so a new file is counted before it is committed.
@@ -42,6 +50,7 @@ def tracked_files(root: Path) -> list[str]:
         check=True,
         capture_output=True,
         text=True,
+        env=git_env(),
     ).stdout
     return [p for p in out.split("\0") if p and p not in SKIP and not p.endswith(SKIP_SUFFIXES)]
 
@@ -119,7 +128,9 @@ def worsened(before: dict, after: dict) -> list[str]:
 
 
 def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    return subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, text=True, env=git_env()
+    )
 
 
 def lock_at(root: Path, rev: str) -> dict | None:

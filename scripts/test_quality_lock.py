@@ -1,8 +1,10 @@
 import json
+import os
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import quality_lock as ql
 
@@ -10,7 +12,9 @@ ZERO = dict.fromkeys(ql.SUPPRESSIONS, 0)
 
 
 def git(root: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(root), *args], check=True, capture_output=True, env=ql.git_env()
+    )
 
 
 class SuppressionCountTest(unittest.TestCase):
@@ -42,6 +46,23 @@ class SuppressionCountTest(unittest.TestCase):
                 (root / rel).write_text("")
             git(root, "add", ".")
             self.assertEqual(ql.tracked_files(root), ["a.py"])
+
+
+class GitEnvironmentTest(unittest.TestCase):
+    def test_a_git_hooks_repository_is_not_touched(self):
+        # lefthook in a linked worktree exports the pushing repository; these temporary
+        # repositories must not write to it or read from it
+        with tempfile.TemporaryDirectory() as hook_tmp, tempfile.TemporaryDirectory() as tmp:
+            pushing, root = Path(hook_tmp), Path(tmp)
+            git(pushing, "init", "-q")
+            git(root, "init", "-q")
+            (root / "a.py").write_text("")
+            hook = {"GIT_DIR": str(pushing / ".git"), "GIT_INDEX_FILE": str(pushing / ".git/index")}
+            with mock.patch.dict(os.environ, hook):
+                git(root, "add", "a.py")
+                (root / "a.py").unlink()
+                self.assertEqual(ql.tracked_files(root), ["a.py"])
+            self.assertEqual(ql.tracked_files(pushing), [])
 
 
 class TestCountTest(unittest.TestCase):
