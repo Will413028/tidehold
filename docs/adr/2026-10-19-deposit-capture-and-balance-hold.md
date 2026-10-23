@@ -4,7 +4,8 @@ project: tidehold
 date: 2026-10-19
 review-date: 2027-01-19
 last-reviewed:
-status: active
+status: superseded
+superseded-by: 2026-10-23-balance-paid-before-trip-weather-refunds
 tags: [tidehold, decision, payments, paypal]
 ---
 
@@ -60,6 +61,7 @@ A dive trip booking has a deposit taken at booking and a balance due before the 
 
 ## Review Notes
 
+- 2026-10-23: superseded by `docs/adr/2026-10-23-balance-paid-before-trip-weather-refunds.md`. D3 (deposit captured at booking) carries over; D11 (balance AUTHORIZE at T-(29 − N), one capture near day 28, reauthorization, 10-day limit) is replaced by a balance paid before the trip and weather outcomes settled as refunds or credit.
 - D11's "daily evaluations write outcomes to the ledger" is replaced by evaluation on each recorded operator cancellation (`docs/adr/2026-10-19-settlement-triggers-and-model-role.md`); money still moves once at finalize or on a whole-trip cancellation.
 
 ## Related

@@ -45,6 +45,11 @@ The product contract said settlements are triggered by official CAP warnings fro
 - C rather than A: matching structured CAP fields is deterministic and reproducible from (policy version, evidence); a runtime model adds quota and failure modes on the path to `authorization_expires_at` and judges something code can read. Cost: we own a per-source event catalogue, and a renamed event waits for an operator confirmation instead of being understood on the spot.
 - The AI stays where judgment is needed: reading wording, finding what it leaves unruled, mapping "storm warning" to a source's values, drafting asks. That is the demo's AI moment; settlement itself looks like a rules engine, a trade-off accepted for reproducible money.
 
+## Amendment (2026-10-23): D3 after the balance model change
+
+- D3 was written for a balance held until finalize. With the balance paid before the trip (`docs/adr/2026-10-23-balance-paid-before-trip-weather-refunds.md`), there is no finalize and no capture deadline: each settlement executes as a refund or credit when the operator's decision is made, and refund after capture is in scope (several refunds per payment, never above what it captured). "No cancellation, no settlement" still holds: money moves only from a recorded operator cancellation. An ask stays open until the operator answers; a cancellation recorded late is settled like any other.
+- Rather than keeping D3's finalize rule: it existed only because a hold expires; without the hold, capturing "per the trip" an answer the operator has not given would override a cancellation the operator recorded.
+
 ## Expected Outcome
 
 - Settlement code has no model call; replaying (policy version, rulings, cancellations with their recorded answers, operator approvals, evidence) reproduces every outcome.
