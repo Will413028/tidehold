@@ -52,3 +52,9 @@ create unique index money_commands_once on money_commands
 create unique index money_commands_one_refund_per_proposal on money_commands
     (proposal_id, payment_id)
     where kind = 'refund' and status <> 'rejected';
+
+-- Failures in a row, apart from the claim count `attempts` (which stays the lease's fencing
+-- token and only grows): an action that waits on PayPal (a refund PayPal reports PENDING) is
+-- read again without moving toward MAX_ATTEMPTS, and a read that succeeds resets the count.
+alter table due_actions add column failures integer not null default 0 check (failures >= 0);
+update due_actions set failures = attempts where state = 'failed';

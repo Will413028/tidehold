@@ -25,6 +25,7 @@ class FakePayPal:
         # ... or times out without taking effect
         self.lose_first: set[str] = set()
         self.refuse: set[str] = set()  # path suffixes PayPal answers with 422
+        self.fail_reads: set[str] = set()  # path prefixes whose reads answer 503
 
     def client(self) -> PayPalClient:
         return PayPalClient("id", "secret", transport=httpx.MockTransport(self.handle))
@@ -61,6 +62,10 @@ class FakePayPal:
         """How many POSTs to a path ending in `suffix` reached PayPal (resends included)."""
         return sum(1 for c in self.calls if c.startswith("POST") and c.endswith(suffix))
 
+    def reads(self, prefix: str) -> int:
+        """How many reads of a path starting with `prefix` reached PayPal."""
+        return sum(1 for c in self.calls if c.startswith(f"GET {prefix}"))
+
     def settle_refunds(self, status: str = "COMPLETED") -> None:
         """PayPal finishes every pending refund."""
         for refund in self.refunds.values():
@@ -68,6 +73,8 @@ class FakePayPal:
                 refund["status"] = status
 
     def _get(self, path: str) -> httpx.Response:
+        if any(path.startswith(prefix) for prefix in self.fail_reads):
+            return httpx.Response(503)
         kind, _, ident = path.rpartition("/")
         found = {
             "/v2/checkout/orders": self.orders,

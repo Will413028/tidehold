@@ -694,6 +694,151 @@ async def test_a_settlement_refund_sent_before_a_crash_is_read_and_finished(
     }
 
 
+async def _deposits(conn: Conn, trip_id: str) -> list[dict[str, Any]]:
+    """Each guest's deposit, in the order settlement visits the guests."""
+    rows = await (
+        await conn.execute(
+            "select g.name, p.id, p.capture_id, p.refunded_minor from guests g"
+            " join payments p on p.id = g.deposit_payment_id where g.trip_id = %s"
+            " order by g.created_at, g.id",
+            (trip_id,),
+        )
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+async def _age_capture(conn: Conn, payment_id: UUID, days: int) -> None:
+    """The capture happened `days` ago (the window counts from it)."""
+    await conn.execute(
+        "update payments set captured_at = now() - make_interval(days => %s) where id = %s",
+        (days, payment_id),
+    )
+
+
+async def _settle_actions(conn: Conn) -> list[str]:
+    rows = await (
+        await conn.execute("select state from due_actions where kind = 'settle_proposal'")
+    ).fetchall()
+    return [r["state"] for r in rows]
+
+
+async def test_a_refund_refused_when_recorded_asks_and_the_other_guests_are_refunded(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+) -> None:
+    """Ana, visited first, paid her deposit over 180 days ago: her refund is refused before
+    PayPal and asked about with the reason; Ben is refunded; the settlement stays accepted, and
+    running it again changes nothing."""
+    trip = await _trip(operator, [WHOLE_TRIP_RULE])
+    await _guest(operator, client, conn, paypal, trip["id"])
+    ben = await operator.post(f"/api/trips/{trip['id']}/guests", json={"name": "Ben"})
+    token = ben.json()["guests"][-1]["token"]
+    assert (await client.post(f"/api/guest/{token}/deposit/test-card")).status_code == 200
+    assert (await client.post(f"/api/guest/{token}/balance/test-card")).status_code == 200
+    ana, _ = await _deposits(conn, trip["id"])
+    await _age_capture(conn, ana["id"], 181)
+
+    await _cancel(operator, trip["id"], "rest", 1)
+    await _tick(conn, paypal)
+    await due.schedule(
+        conn,
+        "settle_proposal",
+        UUID((await _proposals(operator, trip["id"]))[0]["id"]),
+        due_at=None,
+    )
+    await _tick(conn, paypal, _now() + timedelta(minutes=2))
+
+    ana, ben_deposit = await _deposits(conn, trip["id"])
+    asks = [p for p in await _proposals(operator, trip["id"]) if p["kind"] == "money_refused"]
+    states = {p["kind"]: p["state"] for p in await _proposals(operator, trip["id"])}
+    assert (ana["refunded_minor"], ben_deposit["refunded_minor"]) == (0, 5000)
+    assert [a["facts"]["code"] for a in asks] == ["REFUND_WINDOW_CLOSED"]
+    assert states["settlement"] == "accepted"
+    assert await _settle_actions(conn) == ["done", "done"]
+    assert not [c for c in paypal.calls if ana["capture_id"] in c]
+    assert paypal.posts("/refund") == 1
+
+
+async def test_a_pending_refund_is_read_until_paypal_completes_it(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+) -> None:
+    """PayPal keeps the refund PENDING for more reads than a failing action would get; it is
+    read until PayPal completes it, sent once, and the settlement then ends."""
+    trip = await _trip(operator, [WHOLE_TRIP_RULE])
+    await _guest(operator, client, conn, paypal, trip["id"])
+    paypal.refund_status = "PENDING"
+    await _cancel(operator, trip["id"], "rest", 1)
+
+    now = _now()
+    for _ in range(30):
+        await _tick(conn, paypal, now)
+        if paypal.reads("/v2/payments/refunds/") > due.MAX_ATTEMPTS:
+            paypal.settle_refunds()
+        if {p["kind"]: p["state"] for p in await _proposals(operator, trip["id"])} == {
+            "settlement": "executed"
+        }:
+            break
+        now += timedelta(hours=1, minutes=1)
+    else:
+        pytest.fail("the settlement never ended")
+
+    [deposit] = await _deposits(conn, trip["id"])
+    failed = await (
+        await conn.execute("select kind from due_actions where state = 'failed'")
+    ).fetchall()
+    assert paypal.reads("/v2/payments/refunds/") > due.MAX_ATTEMPTS
+    assert deposit["refunded_minor"] == 5000
+    assert paypal.posts("/refund") == 1
+    assert failed == []
+
+
+@pytest.mark.parametrize("by", ["settlement", "reconciliation"])
+async def test_a_refund_whose_window_closes_before_its_first_send_is_not_sent(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal, by: str
+) -> None:
+    """Recorded inside the window, not sent (the run stopped), and the window closed since:
+    nothing goes to PayPal, the operator is asked with the reason, and the refund no longer
+    holds the capture or the settlement's one live refund."""
+    trip = await _trip(operator, [WHOLE_TRIP_RULE])
+    await _guest(operator, client, conn, paypal, trip["id"])
+    proposal = await _cancel(operator, trip["id"], "rest", 1)
+    [deposit] = await _deposits(conn, trip["id"])
+    async with conn.transaction():
+        refund = await commands.record_refund(
+            conn, deposit["id"], amount_minor=5000, now=_now(), proposal_id=UUID(proposal["id"])
+        )
+    await _age_capture(conn, deposit["id"], 181)
+
+    if by == "reconciliation":
+        await service.reconcile(conn, paypal.client(), deposit["id"])
+    await execute.settle(conn, paypal.client(), UUID(proposal["id"]), _now())
+
+    row = await (
+        await conn.execute(
+            "select status, error_code, sent_at from money_commands where id = %s", (refund["id"],)
+        )
+    ).fetchone()
+    asks = [p for p in await _proposals(operator, trip["id"]) if p["kind"] == "money_refused"]
+    assert row is not None
+    assert (row["status"], row["error_code"], row["sent_at"]) == (
+        "rejected",
+        "REFUND_WINDOW_CLOSED",
+        None,
+    )
+    assert paypal.posts("/refund") == 0
+    assert [a["facts"]["code"] for a in asks] == ["REFUND_WINDOW_CLOSED"]
+    assert {p["kind"]: p["state"] for p in await _proposals(operator, trip["id"])}[
+        "settlement"
+    ] == "accepted"
+    live = await (
+        await conn.execute(
+            "select count(*) as n from money_commands"
+            " where kind = 'refund' and status <> 'rejected'"
+        )
+    ).fetchone()
+    assert live is not None
+    assert live["n"] == 0
+
+
 # --- drafting asks ---------------------------------------------------------------------------
 
 

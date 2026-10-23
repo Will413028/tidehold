@@ -17,6 +17,7 @@ from tidehold.identity.sessions import new_workspace
 from tidehold.money import commands, service
 from tidehold.money.commands import Intent, Purpose
 from tidehold.money.paypal import TEST_CARD, PayPalUnknownOutcome
+from tidehold.platform import due_actions as due
 from tidehold.platform.db import Conn, connect
 from tidehold.platform.errors import Conflict, LimitReached
 
@@ -435,7 +436,7 @@ async def test_a_pending_refund_stays_open_until_paypal_completes_it(conn: Conn)
     command = await _refund(conn, payment_id, 20000)
 
     assert await service.execute(conn, fake.client(), command["id"]) == "unknown"
-    assert await service.reconcile(conn, fake.client(), payment_id) == {command["id"]: "unknown"}
+    assert await service.reconcile(conn, fake.client(), payment_id) == {command["id"]: "pending"}
     assert (await _payment_row(conn, payment_id))["refunded_minor"] == 0
     with pytest.raises(Conflict, match="REFUND_EXCEEDS_CAPTURED"):
         await _refund(conn, payment_id, 10001)  # the pending one still counts
@@ -446,6 +447,64 @@ async def test_a_pending_refund_stays_open_until_paypal_completes_it(conn: Conn)
     assert row["status"] == "succeeded"
     assert (await _payment_row(conn, payment_id))["refunded_minor"] == 20000
     assert fake.posts("/refund") == 1
+
+
+async def _reconcile_runs(conn: Conn, fake: FakePayPal, payment_id: UUID) -> list[str]:
+    """Run the payment's `reconcile_payment` action until it is no longer pending (at most 12
+    runs, an hour apart); the action's state after each run."""
+
+    async def reconcile(c: Conn, action: due.Action, _: datetime) -> None:
+        assert action.payment_id is not None
+        await service.reconcile_due(c, fake.client(), action.payment_id)
+
+    states: list[str] = []
+    now = datetime.now(UTC)
+    for _ in range(12):
+        now += timedelta(hours=1, minutes=1)
+        await due.run_due(conn, {"reconcile_payment": reconcile}, now)
+        row = await (
+            await conn.execute(
+                "select state from due_actions where payment_id = %s order by id desc limit 1",
+                (payment_id,),
+            )
+        ).fetchone()
+        assert row is not None
+        states.append(row["state"])
+        if row["state"] != "pending":
+            break
+    return states
+
+
+async def test_a_refund_read_that_keeps_failing_ends_failed(conn: Conn) -> None:
+    """A pending refund is only waiting; a read that keeps failing is not, and still ends in a
+    failed action after the failures in a row `due_actions` allows."""
+    fake = FakePayPal()
+    fake.refund_status = "PENDING"
+    payment_id = await _paid(conn, fake, "deposit")
+    command = await _refund(conn, payment_id, 1000)
+    await service.execute(conn, fake.client(), command["id"])
+    fake.fail_reads.add("/v2/payments/refunds/")
+
+    states = await _reconcile_runs(conn, fake, payment_id)
+
+    assert states[-1] == "failed"
+    assert len(states) == due.MAX_ATTEMPTS
+    assert (await _command(conn, command["id"]))["status"] == "unknown"
+
+
+async def test_a_pending_refund_beside_an_unknown_one_still_backs_off(conn: Conn) -> None:
+    fake = FakePayPal()
+    fake.refund_status = "PENDING"
+    payment_id = await _paid(conn, fake, "deposit")
+    pending = await _refund(conn, payment_id, 1000)
+    await service.execute(conn, fake.client(), pending["id"])
+    fake.time_out_first.add("refund")
+    lost = await _refund(conn, payment_id, 1000)
+    await service.execute(conn, fake.client(), lost["id"])
+    fake.fail_reads.add("/v2/checkout/orders/")  # the lost one can only be found in the order
+
+    with pytest.raises(due.RetryLater):
+        await service.reconcile_due(conn, fake.client(), payment_id)
 
 
 async def test_a_test_card_payment_keeps_its_order_id(conn: Conn) -> None:

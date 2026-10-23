@@ -285,6 +285,66 @@ async def record_refund(
     )
 
 
+# Refusals made here, before PayPal is called; a refund refused this way is stored `rejected`
+# with `sent_at` null, so every later run of its settlement finds it final.
+REFUSED_BEFORE_PAYPAL = ("REFUND_WINDOW_CLOSED", "REFUND_EXCEEDS_CAPTURED")
+
+
+async def record_refused_refund(
+    conn: Conn, payment_id: UUID, *, amount_minor: int, proposal_id: UUID, code: str
+) -> DictRow:
+    """Store a settlement's refund that was refused before PayPal (`REFUSED_BEFORE_PAYPAL`):
+    closed at once, never sent, so a rerun does not try it again and the operator is asked
+    with the reason (plan step 8b)."""
+    current = await payment(conn, payment_id)
+    command_id = uuid4()
+    row = await insert_returning(
+        conn,
+        "insert into money_commands (id, payment_id, kind, target_id, amount_minor, request_id,"
+        " invoice_id, status, error_code, completed_at, proposal_id)"
+        " values (%s, %s, 'refund', %s, %s, %s, %s, 'rejected', %s, now(), %s) returning *",
+        (
+            command_id,
+            payment_id,
+            current["capture_id"],
+            amount_minor,
+            request_id("refund", command_id),
+            invoice_id(command_id),
+            code,
+            proposal_id,
+        ),
+    )
+    await append(conn, payment_id, "refund_refused", {"command": str(command_id), "error": code})
+    return row
+
+
+async def close_refund_past_window(conn: Conn, command_id: UUID) -> bool:
+    """Close a refund never sent whose payment's window has passed, without calling PayPal.
+    PayPal's window runs on real time, so this reads the database clock at the moment of the
+    first send (recording checked the caller's clock). The row lock and `sent_at is null` keep
+    it from racing a send."""
+    row = await (
+        await conn.execute(
+            "update money_commands c set status = 'rejected', error_code = 'REFUND_WINDOW_CLOSED',"
+            " completed_at = now() from payments p"
+            " where c.id = %s and p.id = c.payment_id and c.kind = 'refund'"
+            " and c.status = 'pending' and c.sent_at is null"
+            " and now() > p.captured_at + make_interval(days => %s)"
+            " returning c.payment_id",
+            (command_id, REFUND_WINDOW.days),
+        )
+    ).fetchone()
+    if row is None:
+        return False
+    await append(
+        conn,
+        row["payment_id"],
+        "refund_refused",
+        {"command": str(command_id), "error": "REFUND_WINDOW_CLOSED"},
+    )
+    return True
+
+
 async def claim(conn: Conn, command_id: UUID, *, first_send: bool = False) -> DictRow:
     """Mark an open command as sent, so no newer attempt can replace it. `resend` says
     whether it went to PayPal before, whose answer then cannot prove that no money moved.

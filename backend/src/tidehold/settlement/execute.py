@@ -29,7 +29,8 @@ from tidehold.trips import store as trips
 async def _command(conn: Conn, payment_id: UUID, kind: str, proposal_id: UUID) -> DictRow | None:
     row: DictRow | None = await (
         await conn.execute(
-            "select id, status, sent_at from money_commands where payment_id = %s and kind = %s"
+            "select id, status, sent_at, error_code, result, amount_minor from money_commands"
+            " where payment_id = %s and kind = %s"
             " and proposal_id = %s order by created_at desc limit 1",
             (payment_id, kind, proposal_id),
         )
@@ -41,7 +42,9 @@ async def _record(
     conn: Conn, proposal: DictRow, payment_id: UUID, move: dict[str, Any], now: datetime
 ) -> DictRow | None:
     """Store the command, or None when a concurrent run of this settlement stored it first (the
-    unique indexes keep one live command per step, and one live refund per proposal)."""
+    unique indexes keep one live command per step, and one live refund per proposal). A refund
+    refused before PayPal is stored closed, so this guest's move ends there and the others go
+    on."""
     try:
         async with conn.transaction():
             if move["kind"] == "refund":
@@ -61,6 +64,18 @@ async def _record(
             )
     except (psycopg.errors.UniqueViolation, commands.RefundAlreadyRecorded):
         return None
+    except Conflict as error:
+        if error.code not in commands.REFUSED_BEFORE_PAYPAL:
+            raise
+        code = error.code
+    async with conn.transaction():
+        return await commands.record_refused_refund(
+            conn,
+            payment_id,
+            amount_minor=move["amount_minor"],
+            proposal_id=proposal["id"],
+            code=code,
+        )
 
 
 async def _send(
@@ -86,19 +101,30 @@ async def _send(
                 if stored is None or stored["status"] == "pending"
                 else str(stored["status"])
             )
-    if existing["status"] != "pending":
-        return str(existing["status"])
-    try:
-        # only the first send goes from here: a concurrent run of this settlement may be
-        # sending it right now, and a send whose answer was lost is resent only after a read
-        return await service.execute(conn, client, existing["id"], first_send=True)
-    except Conflict as error:
-        if error.code not in ("MONEY_COMMAND_ALREADY_SENT", "MONEY_COMMAND_NOT_OPEN"):
-            raise
-    async with conn.transaction():
-        await due.schedule(conn, "reconcile_payment", payment_id, due_at=None)
-    stored = await _command(conn, payment_id, move["kind"], proposal["id"])
-    return "unknown" if stored is None or stored["status"] == "pending" else str(stored["status"])
+    if existing["status"] == "pending":
+        try:
+            # only the first send goes from here: a concurrent run of this settlement may be
+            # sending it right now, and a send whose answer was lost is resent only after a read
+            await service.execute(conn, client, existing["id"], first_send=True)
+        except Conflict as error:
+            if error.code not in ("MONEY_COMMAND_ALREADY_SENT", "MONEY_COMMAND_NOT_OPEN"):
+                raise
+            async with conn.transaction():
+                await due.schedule(conn, "reconcile_payment", payment_id, due_at=None)
+        existing = await _command(conn, payment_id, move["kind"], proposal["id"]) or existing
+    return _status(existing)
+
+
+def _status(command: DictRow) -> str:
+    """What one move's command means for its settlement:
+    - `refused`: closed before PayPal (window, bound), never sent; the operator decides;
+    - `processing`: a refund PayPal reports PENDING, read until it ends (`reconcile_payment`);
+    - otherwise the command's own status (`pending` and `unknown` are retried)."""
+    if command["status"] == "rejected" and command["sent_at"] is None:
+        return "refused"
+    if command["status"] == "unknown" and (command["result"] or {}).get("status") == "PENDING":
+        return "processing"
+    return str(command["status"])
 
 
 def _released(proposal_rows: list[DictRow], guest_id: str) -> int:
@@ -190,36 +216,46 @@ async def settle(conn: Conn, client: PayPalClient | None, proposal_id: UUID, now
         for payment_id, move in _moves(proposal, guest, accepted):
             status = await _send(conn, client, proposal, (payment_id, move), now)
             statuses.append(status)
-            if status == "rejected":
-                await _refused(conn, proposal, guest, move)
+            if status in ("rejected", "refused"):
+                await _refused(conn, proposal, guest, (payment_id, move))
     if "unknown" in statuses or "pending" in statuses:
         raise due.RetryLater("PAYPAL_OUTCOME_STILL_UNKNOWN")
+    if "processing" in statuses or "refused" in statuses:
+        # a pending refund's read runs this again when it ends; a refusal before PayPal keeps
+        # the settlement accepted, for the operator (plan step 8b)
+        return
     await conn.execute(
         "update proposals set state = 'executed' where id = %s and state = 'accepted'",
         (proposal_id,),
     )
 
 
-async def _refused(conn: Conn, proposal: DictRow, guest: DictRow, move: dict[str, Any]) -> None:
+async def _refused(
+    conn: Conn, proposal: DictRow, guest: DictRow, step: tuple[UUID, dict[str, Any]]
+) -> None:
+    """Ask the operator about a move that did not happen: refused by PayPal, or before PayPal
+    was called (the code says which and why), once per command."""
+    payment_id, move = step
     trip = await trips.trip(conn, proposal["workspace_id"], proposal["trip_id"])
-    command = await _command(
-        conn,
-        guest["deposit_id"] if move["kind"] == "refund" else guest["balance_id"],
-        move["kind"],
-        proposal["id"],
-    )
+    command = await _command(conn, payment_id, move["kind"], proposal["id"])
     if command is None:
         return
+    by = "tidehold refused" if command["sent_at"] is None else "PayPal refused"
     await proposals.ask(
         conn,
         trip,
         proposals.NewAsk(
             "money_refused",
             f"command:{command['id']}",
-            f"PayPal refused the {move['kind']} for {guest['name']}"
-            f" ({usd(move['amount_minor'])}). Settle it with the guest outside"
-            " tidehold, then dismiss this ask.",
-            {"guest": guest["name"], "kind": move["kind"], "amount_minor": move["amount_minor"]},
+            f"{by} the {move['kind']} for {guest['name']}"
+            f" ({usd(move['amount_minor'])}, {command['error_code']}). Settle it with the guest"
+            " outside tidehold, then dismiss this ask.",
+            {
+                "guest": guest["name"],
+                "kind": move["kind"],
+                "amount_minor": move["amount_minor"],
+                "code": command["error_code"],
+            },
         ),
     )
 

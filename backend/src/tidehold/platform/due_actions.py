@@ -58,6 +58,7 @@ class Action:
     proposal_id: UUID | None
     due_at: datetime
     attempts: int
+    failures: int = 0
 
 
 type Handler = Callable[[Conn, Action, datetime], Awaitable[None]]
@@ -65,6 +66,15 @@ type Handler = Callable[[Conn, Action, datetime], Awaitable[None]]
 
 class RetryLater(Exception):
     """The handler did what it could; run the action again after a backoff."""
+
+
+class Waiting(Exception):
+    """The handler is waiting on someone else (PayPal still processing a refund): run it again
+    after `after`, without counting a failure, and reset the failures in a row."""
+
+    def __init__(self, after: timedelta, reason: str) -> None:
+        super().__init__(reason)
+        self.after = after
 
 
 def backoff(attempts: int) -> timedelta:
@@ -95,12 +105,14 @@ async def claim(
         await conn.execute(
             "update due_actions set state = 'running',"
             " lease_until = %(now)s + make_interval(secs => (%(leases)s::jsonb ->> kind)::int),"
-            " attempts = attempts + 1"
+            " attempts = attempts + 1,"
+            # a worker that stalled past its lease failed this run
+            " failures = failures + case when state = 'running' then 1 else 0 end"
             " where id = (select id from due_actions"
             "   where (state = 'pending' and due_at <= %(now)s)"
             "      or (state = 'running' and lease_until <= %(now)s)"
             "   order by due_at, id for update skip locked limit 1)"
-            " returning id, kind, trip_id, payment_id, proposal_id, due_at, attempts",
+            " returning id, kind, trip_id, payment_id, proposal_id, due_at, attempts, failures",
             {"now": now, "leases": Jsonb(seconds)},
         )
     ).fetchone()
@@ -124,20 +136,37 @@ async def retry(conn: Conn, action: Action, now: datetime, error: str) -> bool:
     (plan step 9). Whether a schedule derived from trip state recreates it is that kind's own
     rule: `request_balance` never does, `check_trip` does, and `settle_proposal` does in the
     whole-trip late-payment sweep."""
-    failed = action.attempts >= MAX_ATTEMPTS
+    failures = action.failures + 1
+    failed = failures >= MAX_ATTEMPTS
     row = await (
         await conn.execute(
             "update due_actions set state = %s, lease_until = null, due_at = %s,"
-            " finished_at = %s, last_error = %s"
+            " finished_at = %s, last_error = %s, failures = %s"
             " where id = %s and state = 'running' and attempts = %s returning id",
             (
                 "failed" if failed else "pending",
-                now + backoff(action.attempts),
+                now + backoff(failures),
                 now if failed else None,
                 error[:500],
+                failures,
                 action.id,
                 action.attempts,
             ),
+        )
+    ).fetchone()
+    return row is not None
+
+
+async def wait(conn: Conn, action: Action, now: datetime, waiting: Waiting) -> bool:
+    """Run the action again after `waiting.after`; it was not a failure, so the failures in a
+    row start over. `attempts` is untouched: it only grows, so a worker that lost the lease
+    still cannot complete the next run."""
+    row = await (
+        await conn.execute(
+            "update due_actions set state = 'pending', lease_until = null, due_at = %s,"
+            " failures = 0, last_error = %s"
+            " where id = %s and state = 'running' and attempts = %s returning id",
+            (now + waiting.after, str(waiting)[:500], action.id, action.attempts),
         )
     ).fetchone()
     return row is not None
@@ -152,6 +181,9 @@ async def run_due(
         ran += 1
         try:
             await handlers[action.kind](conn, action, now)
+        except Waiting as signal:
+            await wait(conn, action, now, signal)
+            continue
         except RetryLater as signal:
             await retry(conn, action, now, str(signal) or "RETRY_LATER")
             continue

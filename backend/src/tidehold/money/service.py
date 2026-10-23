@@ -9,6 +9,7 @@ of moving money again. Who calls `reconcile` and when: the due action of plan st
 nightly job of step 10.
 """
 
+from datetime import timedelta
 from typing import Any, Literal
 from uuid import UUID
 
@@ -33,6 +34,14 @@ from tidehold.platform.db import Conn
 from tidehold.platform.errors import Conflict, DomainError
 
 Outcome = Literal["succeeded", "rejected", "unknown"]
+# What a read tells reconciliation: an outcome, or `pending`, PayPal still processing a refund
+# (not a failure: it is read again until it ends, D18 D4).
+ReadOutcome = Literal["succeeded", "rejected", "unknown", "pending"]
+# How often a refund PayPal reports PENDING is read again. Such a refund can stay pending for
+# days (an eCheck payment, per the developer's review of 2026-10-23; PayPal's refund status
+# reference could not be read from the build container, so the duration is unverified), and the
+# deferred webhook (plan, Scope) would replace these reads.
+PENDING_REFUND_READ_EVERY = timedelta(hours=1)
 
 
 class OutcomePending(PayPalUnknownOutcome):
@@ -149,6 +158,9 @@ async def execute(
     *,
     first_send: bool = False,
 ) -> Outcome:
+    async with conn.transaction():
+        if await commands.close_refund_past_window(conn, command_id):
+            return "rejected"  # never sent, and PayPal would refuse it now
     async with conn.transaction():
         command = await commands.claim(conn, command_id, first_send=first_send)
         if command["method"] == "test_card" and card is None:
@@ -278,7 +290,7 @@ async def _read(
 
 async def _settle_from_read(
     conn: Conn, command: DictRow, read: Read, result: dict[str, Any] | None
-) -> Outcome:
+) -> ReadOutcome:
     async with conn.transaction():
         if read in ("succeeded", "rejected"):
             status: commands.Status = "succeeded" if read == "succeeded" else "rejected"
@@ -298,11 +310,12 @@ async def _settle_from_read(
                 # done and finishes (plan step 8a's handler, rerun safely)
                 await due.schedule(conn, "settle_proposal", command["proposal_id"], due_at=None)
             return status
-        if result is not None:
+        if result is not None and result != command["result"]:
+            # keep what PayPal said (a refund id), once: an unchanged read writes nothing
             await commands.complete(
                 conn, command["id"], "unknown", result=result, error_code=command["error_code"]
             )
-    return "unknown"
+    return "pending" if (result or {}).get("status") == "PENDING" else "unknown"
 
 
 async def reconcile(
@@ -332,11 +345,15 @@ async def reconcile(
 
 
 async def reconcile_due(conn: Conn, client: PayPalClient, payment_id: UUID) -> None:
-    """The `reconcile_payment` due action: resend the payment's open commands; back off while
-    PayPal's answer is still unknown (a command refused on resend stays open for step 8)."""
+    """The `reconcile_payment` due action: settle the payment's open commands. While an outcome
+    is unknown (a read or a send that failed) it backs off and, after the failures in a row
+    `due_actions` allows, fails for the operator; a refund PayPal reports PENDING is only
+    waiting, so it is read again every `PENDING_REFUND_READ_EVERY` until it ends."""
     outcomes = await reconcile(conn, client, payment_id, TEST_CARD)
     if "unknown" in outcomes.values():
         raise due.RetryLater("PAYPAL_OUTCOME_STILL_UNKNOWN")
+    if "pending" in outcomes.values():
+        raise due.Waiting(PENDING_REFUND_READ_EVERY, "PAYPAL_REFUND_PENDING")
 
 
 class PaymentRefused(Conflict):

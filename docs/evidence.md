@@ -74,6 +74,9 @@ Each made the named test fail; the code was restored afterwards.
 | Resend an unknown open without reading its order | `test_an_unknown_open_is_resolved_from_its_order_before_any_resend` |
 | A run that finds its settlement's refund already recorded raises instead of stepping aside | `test_a_proposal_refunds_a_payment_once_when_settled_twice[50]`, `[100]` |
 | No reconcile scheduled for a settlement command already sent | `test_a_settlement_refund_sent_before_a_crash_is_read_and_finished` |
+| A refund refused when recorded (window, bound) is not caught by the settlement (local acceptance review) | `test_a_refund_refused_when_recorded_asks_and_the_other_guests_are_refunded` (the later guest got no refund) |
+| A refund PayPal reports PENDING backs off with `RetryLater` instead of waiting (local acceptance review) | `test_a_pending_refund_is_read_until_paypal_completes_it` (the settlement never ended) |
+| No window check before a refund's first send (local acceptance review) | `test_a_refund_whose_window_closes_before_its_first_send_is_not_sent[settlement]`, `[reconciliation]` |
 
 ### Coverage of the money path (2026-10-19, report only)
 
