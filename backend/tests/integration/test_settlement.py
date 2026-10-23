@@ -4,6 +4,7 @@ No settlement test touches a model provider: the compiler of this module's app r
 call, and evaluation is asserted to have made none.
 """
 
+import asyncio
 import json
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
@@ -20,9 +21,9 @@ from tests.integration.payloads import TRIP, post_trip
 from tidehold.bootstrap import worker
 from tidehold.money import service
 from tidehold.money.paypal import TEST_CARD
-from tidehold.platform.db import Conn
+from tidehold.platform.db import Conn, connect
 from tidehold.policy.providers import Completion, ProviderError
-from tidehold.settlement import drafts
+from tidehold.settlement import drafts, execute
 from tidehold.warnings import store
 from tidehold.warnings.cap import OfficialWarning
 
@@ -581,6 +582,60 @@ async def test_a_refused_refund_becomes_an_ask(
     kinds = {p["kind"]: p["state"] for p in await _proposals(operator, trip["id"])}
     assert kinds == {"settlement": "executed", "money_refused": "asked"}
     assert _moved(paypal, "void") == 1
+
+
+async def _row_lock_waiters(conn: Conn) -> int:
+    row = await (
+        await conn.execute(
+            "select count(*) as n from pg_stat_activity where wait_event_type = 'Lock'"
+            " and query like '%%from payments where id%%for update%%'"
+        )
+    ).fetchone()
+    return int(row["n"]) if row else 0
+
+
+async def test_a_proposal_refunds_a_payment_once_when_settled_twice(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal, database_url: str
+) -> None:
+    """Two runs of one settlement both find no refund yet and both wait on the deposit's row:
+    the second to record it is refused by the per-proposal index (a half refund fits the
+    capture twice) and leaves the sending to the first."""
+    half = [{"kind": "refund", "percent": 50, "deductions": [], "credit_expiry_months": None}]
+    trip = await _trip(operator, [{**WHOLE_TRIP_RULE, "remedies": half}])
+    await _guest(operator, client, conn, paypal, trip["id"])
+    proposal = await _cancel(operator, trip["id"], "rest", 1)
+    assert proposal["state"] == "accepted"
+    deposit = await (
+        await conn.execute(
+            "select deposit_payment_id as id from guests where trip_id = %s", (trip["id"],)
+        )
+    ).fetchone()
+    assert deposit is not None
+
+    async def run() -> None:
+        async with await connect(database_url) as other:
+            await execute.settle(other, paypal.client(), UUID(proposal["id"]), _now())
+
+    async with await connect(database_url) as holder:
+        async with holder.transaction():
+            await holder.execute(
+                "select 1 from payments where id = %s for update", (deposit["id"],)
+            )
+            racing = [asyncio.create_task(run()) for _ in range(2)]
+            for _ in range(100):
+                if await _row_lock_waiters(conn) == 2:
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                pytest.fail("the settlements never waited on the deposit's row")
+        await asyncio.gather(*racing, return_exceptions=True)
+    await execute.settle(conn, paypal.client(), UUID(proposal["id"]), _now())
+
+    refunds = await (
+        await conn.execute("select amount_minor, status from money_commands where kind = 'refund'")
+    ).fetchall()
+    assert [(r["amount_minor"], r["status"]) for r in refunds] == [(2500, "succeeded")]
+    assert paypal.posts("/refund") == 1
 
 
 # --- drafting asks ---------------------------------------------------------------------------

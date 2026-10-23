@@ -190,7 +190,11 @@ async def invite(conn: Conn, workspace_id: UUID, trip_id: UUID, name: str) -> UU
         ).fetchone():
             raise Conflict("GUEST_NAME_TAKEN")
         deposit = await commands.create_payment(
-            conn, workspace_id=workspace_id, purpose="deposit", amount_minor=row["deposit_minor"]
+            conn,
+            workspace_id=workspace_id,
+            purpose="deposit",
+            intent="capture",
+            amount_minor=row["deposit_minor"],
         )
         guest = await insert_returning(
             conn,
@@ -234,6 +238,8 @@ async def _open_balances(conn: Conn, trip_id: UUID) -> int:
             conn,
             workspace_id=guest["workspace_id"],
             purpose="balance",
+            # held until plan step 6 makes the balance a capture (D18)
+            intent="authorize",
             amount_minor=guest["balance_minor"],
         )
         await conn.execute(

@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
+import psycopg
 from psycopg.rows import DictRow
 
 from tidehold.money import commands, service
@@ -27,7 +28,7 @@ from tidehold.trips import store as trips
 async def _command(conn: Conn, payment_id: UUID, kind: str, proposal_id: UUID) -> DictRow | None:
     row: DictRow | None = await (
         await conn.execute(
-            "select id, status from money_commands where payment_id = %s and kind = %s"
+            "select id, status, sent_at from money_commands where payment_id = %s and kind = %s"
             " and proposal_id = %s order by created_at desc limit 1",
             (payment_id, kind, proposal_id),
         )
@@ -35,23 +36,59 @@ async def _command(conn: Conn, payment_id: UUID, kind: str, proposal_id: UUID) -
     return row
 
 
-async def _send(
-    conn: Conn, client: PayPalClient, proposal: DictRow, payment_id: UUID, move: dict[str, Any]
-) -> str:
-    """Send one money command for the proposal, or resume the one already stored; returns
-    its status."""
-    existing = await _command(conn, payment_id, move["kind"], proposal["id"])
-    if existing is not None and existing["status"] != "pending":
-        return str(existing["status"])
-    if existing is None:
+async def _record(
+    conn: Conn, proposal: DictRow, payment_id: UUID, move: dict[str, Any], now: datetime
+) -> DictRow | None:
+    """Store the command, or None when a concurrent run of this settlement stored it first (the
+    unique indexes keep one live command per step, and one live refund per proposal)."""
+    try:
         async with conn.transaction():
-            existing = await commands.record_command(
+            if move["kind"] == "refund":
+                return await commands.record_refund(
+                    conn,
+                    payment_id,
+                    amount_minor=move["amount_minor"],
+                    now=now,
+                    proposal_id=proposal["id"],
+                )
+            return await commands.record_command(
                 conn,
                 payment_id,
                 move["kind"],
                 amount_minor=move["amount_minor"],
                 proposal_id=proposal["id"],
             )
+    except psycopg.errors.UniqueViolation:
+        return None
+
+
+async def _send(
+    conn: Conn,
+    client: PayPalClient,
+    proposal: DictRow,
+    step: tuple[UUID, dict[str, Any]],
+    now: datetime,
+) -> str:
+    """Send one money command for the proposal, or resume the one already stored; returns
+    its status. A command already sent whose answer is not recorded is left to
+    `reconcile_payment`, which reads PayPal before sending anything again (D18 D4)."""
+    payment_id, move = step
+    existing = await _command(conn, payment_id, move["kind"], proposal["id"])
+    if existing is None:
+        existing = await _record(conn, proposal, payment_id, move, now)
+        if existing is None:
+            # another run of this settlement stored it and sends it; this run waits for its
+            # outcome (or for `reconcile_payment`, should that run stop before sending)
+            stored = await _command(conn, payment_id, move["kind"], proposal["id"])
+            return (
+                "pending"
+                if stored is None or stored["status"] == "pending"
+                else str(stored["status"])
+            )
+    if existing["status"] != "pending":
+        return str(existing["status"])
+    if existing["sent_at"] is not None:
+        return "unknown"
     return await service.execute(conn, client, existing["id"])
 
 
@@ -121,7 +158,7 @@ async def _late_deposit(conn: Conn, proposal: DictRow, guest: DictRow) -> None:
     )
 
 
-async def settle(conn: Conn, client: PayPalClient | None, proposal_id: UUID) -> None:
+async def settle(conn: Conn, client: PayPalClient | None, proposal_id: UUID, now: datetime) -> None:
     proposal = await (
         await conn.execute("select * from proposals where id = %s", (proposal_id,))
     ).fetchone()
@@ -142,7 +179,7 @@ async def settle(conn: Conn, client: PayPalClient | None, proposal_id: UUID) -> 
     for guest in await trips.guests(conn, proposal["trip_id"]):
         await _late_deposit(conn, proposal, guest)
         for payment_id, move in _moves(proposal, guest, accepted):
-            status = await _send(conn, client, proposal, payment_id, move)
+            status = await _send(conn, client, proposal, (payment_id, move), now)
             statuses.append(status)
             if status == "rejected":
                 await _refused(conn, proposal, guest, move)
@@ -247,8 +284,8 @@ async def ensure_schedules(conn: Conn, now: datetime) -> int:
 
 
 async def settle_due(
-    conn: Conn, action: due.Action, _: datetime, client: PayPalClient | None
+    conn: Conn, action: due.Action, now: datetime, client: PayPalClient | None
 ) -> None:
     if action.proposal_id is None:
         raise ValueError("settle_proposal needs a proposal")
-    await settle(conn, client, action.proposal_id)
+    await settle(conn, client, action.proposal_id, now)

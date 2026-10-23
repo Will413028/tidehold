@@ -10,6 +10,7 @@ from tidehold.money.paypal import (
     PayPalUnexpectedResponse,
     PayPalUnknownOutcome,
     capture_of,
+    refunds_of,
     usd,
 )
 from tidehold.platform.settings import Settings, paypal_from_env
@@ -91,3 +92,37 @@ def test_an_answer_without_a_capture_is_unexpected_not_failed() -> None:
 
 def test_amounts_are_sent_as_usd_decimal_strings() -> None:
     assert usd(30005) == {"currency_code": "USD", "value": "300.05"}
+
+
+async def test_reads_show_an_orders_refunds_by_invoice_id_and_a_refunds_status() -> None:
+    order = {
+        "id": "O1",
+        "status": "COMPLETED",
+        "purchase_units": [
+            {
+                "payments": {
+                    "captures": [{"id": "C1", "status": "COMPLETED", "amount": usd(3000)}],
+                    "refunds": [
+                        {
+                            "id": "R1",
+                            "status": "PENDING",
+                            "amount": usd(1500),
+                            "invoice_id": "tidehold-a",
+                        }
+                    ],
+                }
+            }
+        ],
+    }
+    seen: list[httpx.Request] = []
+
+    read = await _client(httpx.Response(200, json=order), seen).get_order("O1")
+
+    assert [(r.refund_id, r.status, r.amount_minor, r.invoice_id) for r in refunds_of(read)] == [
+        ("R1", "PENDING", 1500, "tidehold-a")
+    ]
+    assert refunds_of({"id": "O2", "purchase_units": [{"payments": {}}]}) == []
+    assert (seen[-1].method, seen[-1].url.path) == ("GET", "/v2/checkout/orders/O1")
+    pending = {"id": "R1", "status": "PENDING", "amount": usd(1500), "invoice_id": "tidehold-a"}
+    refund = await _client(httpx.Response(200, json=pending), seen).get_refund("R1")
+    assert (refund.status, seen[-1].url.path) == ("PENDING", "/v2/payments/refunds/R1")

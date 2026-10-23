@@ -15,7 +15,7 @@ T0 = datetime(2026, 11, 1, 9, 0, tzinfo=UTC)
 async def _payment(conn: Conn) -> UUID:
     workspace, _ = await new_workspace(conn)
     return await commands.create_payment(
-        conn, workspace_id=workspace, purpose="balance", amount_minor=1000
+        conn, workspace_id=workspace, purpose="balance", intent="authorize", amount_minor=1000
     )
 
 

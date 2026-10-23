@@ -1,7 +1,9 @@
 """PayPal Orders v2 / Payments v2 client, pinned to the sandbox.
 
 Ported from dive-trip-agent@8065eba `modules/deposits/paypal.py`; tidehold adds CAPTURE
-orders (the booking deposit, D3) and reauthorization (D11).
+orders (the deposit, and the balance since D18), reauthorization (D11, until plan step 8c) and
+reads of an order, a capture and a refund, so an unknown outcome is resolved from PayPal's own
+record before anything is resent (D18 D4).
 
 Every write carries a caller-supplied PayPal-Request-Id, so a retry with the same key
 returns the original result instead of moving money twice. Transport errors, 5xx answers
@@ -87,6 +89,7 @@ class Refund:
     refund_id: str
     status: str
     amount_minor: int
+    invoice_id: str | None = None
 
 
 def usd(minor: int) -> dict[str, str]:
@@ -274,8 +277,19 @@ class PayPalClient:
             {"amount": usd(amount_minor), "invoice_id": invoice_id},
             request_id,
         )
-        with answered("PAYPAL_REFUND_UNEXPECTED"):
-            return Refund(str(refund["id"]), str(refund["status"]), minor_of(refund["amount"]))
+        return refund_of(refund)
+
+    async def get_order(self, order_id: str) -> dict[str, Any]:
+        """The order with its captures, authorizations and refunds, as PayPal shows it now."""
+        return await self._call("GET", f"/v2/checkout/orders/{order_id}")
+
+    async def get_capture(self, capture_id: str) -> Capture:
+        capture = await self._call("GET", f"/v2/payments/captures/{capture_id}")
+        with answered("PAYPAL_CAPTURE_UNEXPECTED"):
+            return Capture(str(capture["id"]), str(capture["status"]), minor_of(capture["amount"]))
+
+    async def get_refund(self, refund_id: str) -> Refund:
+        return refund_of(await self._call("GET", f"/v2/payments/refunds/{refund_id}"))
 
 
 def order_id_of(order: dict[str, Any]) -> str:
@@ -302,6 +316,28 @@ def authorization_of(order: dict[str, Any]) -> Authorization:
             minor_of(auth["amount"]),
             auth.get("expiration_time"),
         )
+
+
+def refund_of(refund: dict[str, Any]) -> Refund:
+    with answered("PAYPAL_REFUND_UNEXPECTED"):
+        invoice = refund.get("invoice_id")
+        return Refund(
+            str(refund["id"]),
+            str(refund["status"]),
+            minor_of(refund["amount"]),
+            str(invoice) if invoice is not None else None,
+        )
+
+
+def refunds_of(order: dict[str, Any]) -> list[Refund]:
+    """Every refund an order shows, across its purchase units (none is not an error)."""
+    with answered("PAYPAL_ORDER_UNEXPECTED"):
+        units = order.get("purchase_units") or []
+        return [
+            refund_of(refund)
+            for unit in units
+            for refund in ((unit.get("payments") or {}).get("refunds") or [])
+        ]
 
 
 def capture_of(order: dict[str, Any]) -> Capture:

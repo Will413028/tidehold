@@ -9,13 +9,22 @@ from tidehold.platform.db import Conn
 async def test_the_smoke_runs_the_three_money_flows(conn: Conn) -> None:
     report = await sandbox.smoke(conn, FakePayPal().client())
 
-    assert {name: (r["outcome"], r["state"]) for name, r in report.items()} == {
-        "deposit_capture_then_refund": ("succeeded", "captured"),
-        "balance_hold_then_partial_final_capture": ("succeeded", "captured"),
-        "balance_hold_then_void": ("succeeded", "voided"),
+    assert {name: (r["outcomes"], r["state"]) for name, r in report.items()} == {
+        "deposit_capture_then_two_refunds": (["succeeded", "succeeded"], "captured"),
+        "balance_capture_then_refund": (["succeeded"], "captured"),
+        "balance_hold_then_partial_final_capture": (["succeeded"], "captured"),
+        "balance_hold_then_void": (["succeeded"], "voided"),
     }
-    assert report["deposit_capture_then_refund"]["refunded_minor"] == 1500
+    assert report["deposit_capture_then_two_refunds"]["refunded_minor"] == 2500
+    assert report["balance_capture_then_refund"]["refunded_minor"] == 1000
     assert report["balance_hold_then_partial_final_capture"]["captured_minor"] == 2000
+    # the order read back lists every refund by the invoice id tidehold sent
+    listed = [
+        (r["listed"], r["status"])
+        for name in ("deposit_capture_then_two_refunds", "balance_capture_then_refund")
+        for r in report[name]["refunds_in_order"]
+    ]
+    assert listed == [(True, "COMPLETED")] * 3
 
 
 async def test_the_reauthorization_check_keeps_its_state_between_days(tmp_path: Path) -> None:

@@ -2,12 +2,14 @@
 
 Ported from dive-trip-agent@8065eba `modules/deposits/service.py`. A command commits as
 `pending` before PayPal is called. A refusal of its first send closes it; an unknown outcome,
-or a refusal of a resend, leaves it open,
-and `reconcile` resends it with the same request id so PayPal returns the original result
-instead of moving money again. Who calls `reconcile` and when: the due action of plan step 6
-and the nightly job of step 10.
+or a refusal of a resend, leaves it open. `reconcile` first reads PayPal's own record of an
+open payment or a refund (D18 D4) and settles the command from it; only what the read shows
+not done is resent, with the same request id, so PayPal returns the original result instead
+of moving money again. Who calls `reconcile` and when: the due action of plan step 6 and the
+nightly job of step 10.
 """
 
+from collections.abc import Sequence
 from typing import Any, Literal
 from uuid import UUID
 
@@ -24,6 +26,7 @@ from tidehold.money.paypal import (
     authorization_of,
     capture_of,
     order_id_of,
+    refunds_of,
 )
 from tidehold.platform import due_actions as due
 from tidehold.platform.db import Conn
@@ -32,21 +35,55 @@ from tidehold.platform.errors import Conflict, DomainError
 Outcome = Literal["succeeded", "rejected", "unknown"]
 
 
+class OutcomePending(PayPalUnknownOutcome):
+    """PayPal answered, but the money has not settled (or the answer was not one we can
+    record); what it did tell us (an order id, a refund id) is kept for the read that follows."""
+
+    def __init__(self, code: str, result: dict[str, Any]) -> None:
+        super().__init__(code)
+        self.result = result
+
+
+def _placed_by(order: dict[str, Any], command: DictRow, *, capture: bool) -> dict[str, Any]:
+    """What an order that placed the payment shows, in the shape `_apply` records. Anything
+    short of a completed capture (or a created hold) of exactly the command's amount stays
+    unknown; the order id is kept so the next read can find it."""
+    order_id = order.get("id")
+    try:
+        if capture:
+            found = capture_of(order)
+            if found.status == "COMPLETED" and found.amount_minor == command["amount_minor"]:
+                return {"orderId": order_id_of(order), "captureId": found.capture_id}
+            code = "PAYPAL_CAPTURE_UNEXPECTED"
+        else:
+            auth = authorization_of(order)
+            if auth.status == "CREATED" and auth.amount_minor == command["amount_minor"]:
+                return {
+                    "orderId": order_id_of(order),
+                    "authorizationId": auth.authorization_id,
+                    "expiresAt": auth.expires_at,
+                }
+            code = "PAYPAL_AUTHORIZATION_UNEXPECTED"
+    except PayPalUnexpectedResponse as error:
+        code = error.code
+    raise OutcomePending(code, {"orderId": str(order_id)} if order_id else {})
+
+
 async def _open(
     client: PayPalClient, command: DictRow, payment: DictRow, card: SandboxCard | None
 ) -> dict[str, Any]:
-    deposit = payment["purpose"] == "deposit"
+    capture = payment["intent"] == "capture"
     if command["method"] == "checkout":
         if command["order_id"] is None:
             raise Conflict("PAYMENT_ORDER_MISSING")
         order = await (
             client.capture_order(command["order_id"], request_id=command["request_id"])
-            if deposit
+            if capture
             else client.authorize_order(command["order_id"], request_id=command["request_id"])
         )
     elif card is not None:
         order = await client.create_order(
-            intent="CAPTURE" if deposit else "AUTHORIZE",
+            intent="CAPTURE" if capture else "AUTHORIZE",
             invoice_id=command["invoice_id"],
             amount_minor=command["amount_minor"],
             request_id=command["request_id"],
@@ -54,19 +91,23 @@ async def _open(
         )
     else:
         raise Conflict("PAYMENT_CARD_REQUIRED")
-    if deposit:
-        capture = capture_of(order)
-        if capture.status != "COMPLETED" or capture.amount_minor != command["amount_minor"]:
-            raise PayPalUnexpectedResponse("PAYPAL_CAPTURE_UNEXPECTED")
-        return {"orderId": order_id_of(order), "captureId": capture.capture_id}
-    auth = authorization_of(order)
-    if auth.status != "CREATED" or auth.amount_minor != command["amount_minor"]:
-        raise PayPalUnexpectedResponse("PAYPAL_AUTHORIZATION_UNEXPECTED")
-    return {
-        "orderId": order_id_of(order),
-        "authorizationId": auth.authorization_id,
-        "expiresAt": auth.expires_at,
-    }
+    return _placed_by(order, command, capture=capture)
+
+
+async def _refund(client: PayPalClient, command: DictRow) -> dict[str, Any]:
+    refund = await client.refund(
+        command["target_id"],
+        amount_minor=command["amount_minor"],
+        invoice_id=command["invoice_id"],
+        request_id=command["request_id"],
+    )
+    result = {"refundId": refund.refund_id, "status": refund.status}
+    if refund.status == "PENDING":
+        # the money leaves the merchant later; a read settles it (D18 D4)
+        raise OutcomePending("PAYPAL_REFUND_PENDING", result)
+    if refund.status != "COMPLETED" or refund.amount_minor != command["amount_minor"]:
+        raise OutcomePending("PAYPAL_REFUND_UNEXPECTED", result)
+    return result
 
 
 async def send(
@@ -95,12 +136,7 @@ async def send(
                 raise PayPalUnexpectedResponse("PAYPAL_REAUTHORIZATION_UNEXPECTED")
             return {"authorizationId": auth.authorization_id, "expiresAt": auth.expires_at}
         case "refund":
-            refund = await client.refund(
-                target, amount_minor=amount, invoice_id=command["invoice_id"], request_id=key
-            )
-            if refund.amount_minor != amount:
-                raise PayPalUnexpectedResponse("PAYPAL_REFUND_UNEXPECTED")
-            return {"refundId": refund.refund_id, "status": refund.status}
+            return await _refund(client, command)
         case kind:
             raise ValueError(f"unknown command kind {kind}")
 
@@ -117,30 +153,164 @@ async def execute(
         result = await send(client, command, payment, card)
     except PayPalUnknownOutcome as error:
         async with conn.transaction():
-            await commands.complete(conn, command_id, "unknown", error_code=error.code)
+            await commands.complete(
+                conn,
+                command_id,
+                "unknown",
+                result=getattr(error, "result", None),
+                error_code=error.code,
+            )
             await due.schedule(conn, "reconcile_payment", payment["id"], due_at=None)
         return "unknown"
     except PayPalError as error:
         # A refusal of the first send means no money moved. A refusal of a resend may mean
         # the first send took effect (the request id expired, or PayPal says the hold is
-        # already captured), so the command stays open and keeps its key; step 8 turns a
-        # command that stays open into an operator ask.
+        # already captured), so the command stays open, keeps its key and is marked; a read
+        # settles it if it can, and step 8b asks the operator when it cannot.
         status: commands.Status = "unknown" if command["resend"] else "rejected"
         async with conn.transaction():
             await commands.complete(conn, command_id, status, error_code=error.code)
+            if command["resend"]:
+                await commands.mark_resend_refused(conn, command_id)
         return status
     async with conn.transaction():
         await commands.complete(conn, command_id, "succeeded", result=result)
     return "succeeded"
 
 
+# What a read of PayPal says about a command: settled either way, still undecided (nothing is
+# sent or recorded), or not done at PayPal (send it again under its key).
+Read = Literal["succeeded", "rejected", "undecided", "resend"]
+REFUND_SETTLED: dict[str, Read] = {
+    "COMPLETED": "succeeded",
+    "FAILED": "rejected",
+    "CANCELLED": "rejected",
+    "PENDING": "undecided",
+}
+
+
+async def _read_open(
+    client: PayPalClient, command: DictRow, payment: DictRow
+) -> tuple[Read, dict[str, Any] | None]:
+    order_id = command["order_id"] or (command["result"] or {}).get("orderId")
+    if order_id is None:
+        return "resend", None  # PayPal never told us an order: only the key can find it
+    try:
+        order = await client.get_order(order_id)
+    except PayPalError as error:
+        # an order PayPal no longer knows placed nothing (orders expire unpaid)
+        return ("rejected", None) if error.status == 404 else ("undecided", None)
+    try:
+        return "succeeded", _placed_by(order, command, capture=payment["intent"] == "capture")
+    except OutcomePending:
+        pass
+    return _not_placed(order, command), None
+
+
+def _not_placed(order: dict[str, Any], command: DictRow) -> Read:
+    """An order that shows no capture or hold as recorded."""
+    payments = ((order.get("purchase_units") or [{}])[0].get("payments")) or {}
+    if payments.get("captures") or payments.get("authorizations"):
+        return "undecided"  # placed, but not as recorded (the amount, or still pending)
+    status = order.get("status")
+    if status == "APPROVED" and command["method"] == "checkout":
+        return "resend"  # the buyer approved; our capture or authorize never landed
+    if status in ("CREATED", "PAYER_ACTION_REQUIRED", "VOIDED"):
+        return "rejected"  # nothing placed, and nothing will be without the buyer
+    return "undecided"
+
+
+def _matching(refund: Any, command: DictRow) -> tuple[Read, dict[str, Any]]:
+    result = {"refundId": refund.refund_id, "status": refund.status}
+    read = REFUND_SETTLED.get(refund.status, "undecided")
+    if read == "succeeded" and refund.amount_minor != command["amount_minor"]:
+        read = "undecided"
+    return read, result
+
+
+async def _read_refund(
+    client: PayPalClient, command: DictRow, payment: DictRow
+) -> tuple[Read, dict[str, Any] | None]:
+    refund_id = (command["result"] or {}).get("refundId")
+    try:
+        if refund_id is not None:
+            return _matching(await client.get_refund(refund_id), command)
+        if payment["order_id"] is None:
+            return "resend", None
+        refunds: Sequence[Any] = refunds_of(await client.get_order(payment["order_id"]))
+    except (PayPalError, PayPalUnknownOutcome):
+        return "undecided", None  # a read that failed proves nothing either way
+    found = [r for r in refunds if r.invoice_id == command["invoice_id"]]
+    if not found:
+        return "resend", None
+    return _matching(found[0], command)
+
+
+async def _read(
+    client: PayPalClient, command: DictRow, payment: DictRow
+) -> tuple[Read, dict[str, Any] | None]:
+    """Read PayPal's record of a command whose outcome we do not know. The hold kinds
+    (capture of an authorization, void, reauthorize) have no read and are resent; plan step 8c
+    removes them."""
+    unknown = command["status"] == "unknown" or command["sent_at"] is not None
+    try:
+        match command["kind"]:
+            case "open" if unknown:
+                read, result = await _read_open(client, command, payment)
+            case "refund" if unknown:
+                read, result = await _read_refund(client, command, payment)
+            case _:
+                return "resend", None
+    except PayPalUnknownOutcome:
+        return "undecided", None
+    if read == "resend" and command["resend_refused_at"] is not None:
+        return "undecided", None  # PayPal refused it once already; the operator decides (8b)
+    return read, result
+
+
+async def _settle_from_read(
+    conn: Conn, command: DictRow, read: Read, result: dict[str, Any] | None
+) -> Outcome:
+    async with conn.transaction():
+        if read in ("succeeded", "rejected"):
+            status: commands.Status = "succeeded" if read == "succeeded" else "rejected"
+            await commands.complete(
+                conn,
+                command["id"],
+                status,
+                result=result,
+                error_code=None if read == "succeeded" else "PAYPAL_READ_NOT_PLACED",
+            )
+            if command["proposal_id"] is not None:
+                # the settlement that sent it may have given up waiting; it finds this command
+                # done and finishes (plan step 8a's handler, rerun safely)
+                await due.schedule(conn, "settle_proposal", command["proposal_id"], due_at=None)
+            return status
+        if result is not None:
+            await commands.complete(
+                conn, command["id"], "unknown", result=result, error_code=command["error_code"]
+            )
+    return "unknown"
+
+
 async def reconcile(
     conn: Conn, client: PayPalClient, payment_id: UUID, card: SandboxCard | None = None
 ) -> dict[UUID, str]:
-    """Resend every open command of a payment with its original request id. One command that
-    cannot be sent does not stop the others; its code is the outcome."""
+    """Settle every open command of a payment: a command that may have reached PayPal is read
+    first, and only one PayPal shows not done is resent with its original request id. One
+    command that cannot be sent does not stop the others; its code is the outcome."""
     outcomes: dict[UUID, str] = {}
+    payment = await commands.payment(conn, payment_id)
     for command_id in await commands.open_commands(conn, payment_id):
+        command = await (
+            await conn.execute("select * from money_commands where id = %s", (command_id,))
+        ).fetchone()
+        if command is None:
+            continue
+        read, result = await _read(client, command, payment)
+        if read != "resend":
+            outcomes[command_id] = await _settle_from_read(conn, command, read, result)
+            continue
         try:
             outcomes[command_id] = await execute(conn, client, command_id, card)
         except DomainError as error:
@@ -194,7 +364,7 @@ async def start_checkout(
         payment = await commands.payment(conn, payment_id)
     try:
         order = await client.create_order(
-            intent="CAPTURE" if payment["purpose"] == "deposit" else "AUTHORIZE",
+            intent="CAPTURE" if payment["intent"] == "capture" else "AUTHORIZE",
             invoice_id=command["invoice_id"],
             amount_minor=command["amount_minor"],
             request_id=f"{command['request_id']}-order",
