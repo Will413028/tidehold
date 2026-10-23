@@ -49,7 +49,9 @@ The PayPal-account hold was never placed (`docs/evidence.md`), so the result cov
 ### Reauthorization (`settlement/close.py`, per guest)
 
 - Honor period: 3 days from `payments.authorized_at` (new column, set by the `open` and `reauthorize` successes). PayPal documents a new 3-day honor period for a reauthorized authorization, without extending the 29 days (deposit/balance ADR constraints; not measured).
-- Before a capture: if `now ≥ authorized_at + 3 days − HONOR_MARGIN` (the capture may be retried), record a `reauthorize` command for the owed amount (≤ the authorized amount), authorized by the closing proposal, and execute it.
+- Inside the honor period (`now < authorized_at + 3 days`) the capture goes straight to the current authorization, with no reauthorization: PayPal allows a reauthorization only after the honor period (deposit/balance ADR constraints).
+- From `now ≥ authorized_at + 3 days` on, record a `reauthorize` command for the owed amount (≤ the authorized amount), authorized by the closing proposal, and execute it before the capture.
+- The decision is taken again on every attempt with that attempt's `now`: a capture whose retry crosses the end of the honor period is reauthorized on the retry that finds it over.
   - succeeded: `authorization_id` is the new one; the capture is recorded against it (`record_command` reads the target when it records).
   - rejected: capture the original authorization (the ADR's fallback); `payment_events` keeps the refusal.
   - unknown: `RetryLater`; `reconcile_payment` resends it under the same request id.
@@ -100,6 +102,7 @@ The PayPal-account hold was never placed (`docs/evidence.md`), so the result cov
 | Hold age < 29 days asserted | asserted in every capture test; `test_a_hold_29_days_old_is_never_captured` |
 | Mutation: hold a 3-day trip so its last day is outside the validity → a test fails | open the hold a day earlier (T-(30 − N)) and the validity test fails |
 | Mutation: skip the reauthorization outside the honor period → a test fails | `test_a_capture_after_the_honor_period_is_reauthorized_first` |
+| (developer review) No reauthorization inside the honor period; a retry that crosses it decides again | `test_a_capture_inside_the_honor_period_sends_no_reauthorization`; `test_a_capture_retried_past_the_honor_period_is_reauthorized_on_that_retry` |
 | Both 8a and 8b: no settlement test touches a provider; evidence time < decision time | the settlement suite's raising provider stub stays installed; 8a's evidence-time assertion is unchanged |
 
 Scope items with no acceptance line in the plan get a test too: `test_a_whole_trip_cancellation_captures_what_is_owed_at_once`, `test_finalize_refunds_the_deposit_of_accepted_days_once`, `test_a_balance_credit_is_written_when_its_capture_succeeds`, `test_a_command_refused_on_resend_becomes_an_ask`, `test_a_failed_action_of_the_first_balance_payment_still_shows` (step 9's note).
