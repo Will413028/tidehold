@@ -68,7 +68,7 @@ The demo is for synthetic data, but the URL is public and anyone can type real d
 |---|---|---|---|---|---|
 | Workspace session token | Identify the operator's browser | Cookie in the browser; SHA-256 hash in the database | The workspace | Nobody | Expiry (30 days) or nightly rebuild |
 | Operator wording | Compile rules | Database | The workspace; guests see quoted clauses | Model provider (prompt) | Nightly rebuild |
-| Trip names, guest names and emails (an email only if D19 picks an invoice, step 6b) | Booking and the guest page | Database | The workspace; each guest sees their own trip | PayPal sandbox (payer details come back from checkout) | Nightly rebuild; PayPal sandbox keeps its own records |
+| Trip names and guest names | Booking and the guest page | Database | The workspace; each guest sees their own trip | PayPal sandbox (payer details come back from checkout) | Nightly rebuild; PayPal sandbox keeps its own records |
 
 Controls: the UI says "Sandbox demo: do not enter real personal data" (step 9); logs never include cookies, guest tokens, or PayPal order, capture or refund IDs alongside emails (checked when the first logger is added).
 

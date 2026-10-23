@@ -60,6 +60,17 @@ The superseded ADR held each guest's balance as a PayPal AUTHORIZE at T-(29 − 
 - `AGENTS.md` product contract, README, `requirements.md`, `docs/threat-model.md`; settlement ADR D3 amended.
 - Remove the authorization paths (`holds/schedule.py` T-(29 − N), AUTHORIZE, void, reauthorize, the reauthorization unique index, `bootstrap/sandbox.py` reauthorization check).
 
+## Amendment (2026-10-23): D5's open items decided
+
+- **Balance channel:** the guest page's PayPal checkout. Invoicing v2 is not enabled on the sandbox app shared with the fallback demo (measured on 2026-10-23: no invoicing scope in the token, `403 NOT_AUTHORIZED` on listing invoices), and the developer chose not to change that app. Invoice reminders would let PayPal chase late payers; that waits on an operator asking for it.
+- **Bounds:** trips of 1 to 21 days and balances due 0 to 120 days before the trip. These are input bounds covering the largest values found: liveaboards of about two weeks, and balances due 30 to 105 days ahead. They are not payment limits. PayPal accepts refunds within 180 days of the capture ([Checkout refunds](https://developer.paypal.com/checkout/refund-payment), read 2026-10-23). No bound keeps a refund inside that window, because a guest may pay from invitation and liveaboards take deposits months ahead. So a refund past the window is refused before it is sent and asks the operator with that reason.
+- **Late and unpaid payments:**
+  - The balance is charged net of refunds already decided for it, so a cancelled day is never charged and then refunded, and no PayPal fee is lost on it.
+  - A payment still uncovered gets its own settlement proposal from the original's choice and policy version, through the same mandate check. This replaces "settle it outside tidehold".
+  - Completing a checkout takes the trip lock that recording a cancellation takes.
+  - An unpaid balance asks the operator to wait or to release the guest. Releasing moves no money, because guest-cancellation clauses are not compiled. Operators researched "reserve the right" to treat an unpaid balance as the guest's cancellation (Komodo Cruises, Dragon Dive).
+  - The ask offers no due-date extension: choosing to wait keeps the payment link open.
+
 ## Revocation Triggers
 
 - Vault becomes available in the target markets → the baseline (charge the saved method on the due date).
