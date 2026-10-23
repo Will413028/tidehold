@@ -2,7 +2,39 @@
 
 Newest run first; earlier runs follow under "Earlier run" headings. `backend/tests/unit/test_model_choice.py` fails when the product's prompt hash or a model it may run is not the newest run's.
 
-## Run at prompt 9f7c6e9404b56080 (step 5, 2026-10-20)
+## Run at prompt 00bdb5c3b65fa352 (steps 5b and 5c, 2026-10-23)
+
+Run 2026-10-23 16:14 to 16:55 UTC on oci-a1 in a one-off container (`ghcr.io/astral-sh/uv:0.12.23-python3.13-trixie-slim`), `bench/run.py --runs 2 --split all --models groq:openai/gpt-oss-120b,groq:openai/gpt-oss-20b,groq:qwen/qwen3.8-27b,anthropic:claude-haiku-5-5,anthropic:claude-sonnet-5-5`, run by the developer's agent at the developer's request. Prompt hash `00bdb5c3b65fa352`, labels version 3. Code: `git archive 53b9af7 backend bench`, shipped as `~/tidehold-bench/src/53b9af7`; the commit that adds this section changes no file the run reads but `providers.py` (`BENCHMARKED`) and `settings.py` (the default model). Keys: Groq from the D13 file, Claude from the developer's key in a separate env file on the VM (D22), both through `--env-file`. Raw results stay on the VM: `~/tidehold-bench/results/bench-53b9af7.json`, sha256 `ae62ece346a84d9255b9f732c23e0ddde73385d7509bf7df19e6e412f2a01991`. Table from `python bench/report.py <results>`. Gemini was not run: D6 forbids it on the shared key.
+
+| Model | Split | Structured | Spans located | Rule P / R | Ruling P / R | Event sets | p50 / p95 s | 429 / 503 |
+|---|---|---|---|---|---|---|---|---|
+| `groq:openai/gpt-oss-120b` | dev | 10/10 | 90% | 100% / 80% | 83% / 56% | 8/8 | 3.4 / 8.3 | 9 / 0 |
+| `groq:openai/gpt-oss-120b` | held_out | 8/8 | 90% | 48% / 33% | 67% / 35% | 8/8 | 3.4 / 8.3 | 9 / 0 |
+| `groq:openai/gpt-oss-20b` | dev | 10/10 | 100% | 88% / 70% | 93% / 44% | 8/8 | 2.0 / 4.9 | 8 / 0 |
+| `groq:openai/gpt-oss-20b` | held_out | 6/8 | 100% | 0% / 0% | 75% / 15% | 8/8 | 2.0 / 4.9 | 8 / 0 |
+| `groq:qwen/qwen3.8-27b` | dev | 9/10 | 100% | 100% / 60% | 93% / 67% | 7/8 | 0.8 / 0.9 | 8 / 0 |
+| `groq:qwen/qwen3.8-27b` | held_out | 6/8 | n/a | n/a / 0% | 50% / 20% | 7/8 | 0.8 / 0.9 | 8 / 0 |
+| `anthropic:claude-haiku-5-5` | dev | 10/10 | 100% | 65% / 60% | 71% / 94% | 6/8 | 10.8 / 28.1 | 0 / 0 |
+| `anthropic:claude-haiku-5-5` | held_out | 7/8 | 94% | 86% / 50% | 72% / 50% | 6/8 | 10.8 / 28.1 | 0 / 0 |
+| `anthropic:claude-sonnet-5-5` | dev | 10/10 | 100% | 73% / 80% | 86% / 100% | 8/8 | 4.5 / 14.7 | 0 / 0 |
+| `anthropic:claude-sonnet-5-5` | held_out | 7/8 | 100% | 65% / 42% | 62% / 65% | 8/8 | 4.5 / 14.7 | 0 / 0 |
+
+Failures (both runs): gpt-oss-20b HTTP 400 `json_validate_failed` ×2 (Aquatic Apes); qwen3.8-27b HTTP 429 ×1 after the one wait (Mike's Dauin), quote over 600 characters ×2 (Aquatic Apes), one event set 429; claude-haiku-5-5 and claude-sonnet-5-5 a quote over 600 characters ×1 each (Aquatic Apes, refused by the schema's pydantic bound, which the Claude schema carries only as a description). No daily quota or spend cap was spent. The cost per call was not recorded.
+
+### Reading
+
+- Two runs of 5 dev and 4 held-out fixtures; one model varies a lot between its runs (`gpt-oss-120b` held-out rule recall 50% in run 1, 17% in run 2), so differences of one fixture are noise.
+- On held-out wording, `claude-sonnet-5-5` finds the most rulings (recall 65% against 35% for `gpt-oss-120b`) and more rules (42% against 33%), with every event set exact. Rulings are where the operator is asked before money moves (D3, D16), so a missed ruling is a missed question.
+- `claude-haiku-5-5` has the highest held-out rule precision (86%) but maps 6 of 8 event sets and is the slowest (p95 28.1 s).
+- Claude hit no rate limit; the Groq models were waited out 25 times, on the key the fallback demo shares.
+
+### Default model (D22)
+
+The developer chose `anthropic:claude-sonnet-5-5` (2026-10-23). Both Claude models join `BENCHMARKED`; the Groq models stay until step 11 keeps or removes them.
+
+Fallback during the run: `https://dive-deposits.tail357fef.ts.net/deposits` answered 200 at 17:00 UTC.
+
+## Earlier run (step 5, prompt 9f7c6e9404b56080)
 
 Run 2026-10-20 00:21 to 00:51 UTC on oci-a1 in a one-off container (`ghcr.io/astral-sh/uv:0.12.23-python3.13-trixie-slim`), `bench/run.py --runs 2 --split all --models groq:openai/gpt-oss-120b,groq:openai/gpt-oss-20b,groq:qwen/qwen3.8-27b`. Prompt hash `9f7c6e9404b56080`, labels version 1, keys from the D13 file. Code: the working tree shipped as `~/tidehold-bench/src/tune-9f7c6e94`; its 67 `.py`, `.json` and `.sql` files under `backend/src` and `bench` have the same sha256 as the commit that adds this section. Raw results stay on the VM: `~/tidehold-bench/results/bench-9f7c6e94.json`, sha256 `56e270fec62c968537a7aded047c9863e2ec18743820a7907442b00740ff5ea7`. Table from `python bench/report.py <results>`. Gemini was not run: D6 forbids it on the shared key.
 

@@ -2,8 +2,8 @@ import os
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
-# D6 provisional ranking, first place (model-benchmark.md).
-DEFAULT_COMPILE_MODEL = "groq:openai/gpt-oss-120b"
+# D22: the developer's choice from the run at prompt 00bdb5c3b65fa352 (model-benchmark.md).
+DEFAULT_COMPILE_MODEL = "anthropic:claude-sonnet-5-5"
 
 
 @dataclass(frozen=True)

@@ -296,7 +296,13 @@ VENDORS: dict[str, type[Groq] | type[Gemini] | type[Claude]] = {
 # Exact model IDs measured by the compile benchmark (`model-benchmark.md`, D6, D15); the
 # product runs only these, so a provider cannot swap the model behind an alias.
 BENCHMARKED = frozenset(
-    {"groq:openai/gpt-oss-120b", "groq:openai/gpt-oss-20b", "groq:qwen/qwen3.8-27b"}
+    {
+        "groq:openai/gpt-oss-120b",
+        "groq:openai/gpt-oss-20b",
+        "groq:qwen/qwen3.8-27b",
+        "anthropic:claude-haiku-5-5",
+        "anthropic:claude-sonnet-5-5",
+    }
 )
 
 

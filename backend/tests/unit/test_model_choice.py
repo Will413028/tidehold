@@ -16,6 +16,7 @@ from tidehold.policy.providers import (
     CLAUDE_MAX_TOKENS,
     MAX_OUTPUT_TOKENS,
     VENDORS,
+    Claude,
     Groq,
     build,
 )
@@ -87,13 +88,19 @@ def test_the_configured_model_and_prompt_are_the_last_benchmarked() -> None:
 async def test_only_a_benchmarked_model_id_is_built() -> None:
     with pytest.raises(ValueError, match="not one the benchmark measured"):
         build("groq:openai/gpt-oss", ModelKeys(groq="k"))
-    # Claude runs in the product only once the benchmark has measured it (D22).
+    # A Claude model runs in the product only once the benchmark has measured it (D22).
     with pytest.raises(ValueError, match="not one the benchmark measured"):
-        build("anthropic:claude-haiku-5-5", ModelKeys(anthropic="k"))
-    assert build(DEFAULT_COMPILE_MODEL, ModelKeys()) is None
+        build("anthropic:claude-opus-5-5", ModelKeys(anthropic="k"))
+    assert build(DEFAULT_COMPILE_MODEL, ModelKeys(groq="k")) is None
 
-    provider = build(DEFAULT_COMPILE_MODEL, ModelKeys(groq="k"))
+    provider = build(DEFAULT_COMPILE_MODEL, ModelKeys(anthropic="k", anthropic_workspace="w"))
 
-    assert isinstance(provider, Groq)
-    assert provider.model == "openai/gpt-oss-120b"
+    assert isinstance(provider, Claude)
+    assert (provider.model, provider.workspace) == ("claude-sonnet-5-5", "w")
     await provider.client.aclose()
+
+    fallback = build("groq:openai/gpt-oss-120b", ModelKeys(groq="k"))
+
+    assert isinstance(fallback, Groq)
+    assert fallback.model == "openai/gpt-oss-120b"
+    await fallback.client.aclose()
