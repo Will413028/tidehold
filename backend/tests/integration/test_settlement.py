@@ -974,8 +974,7 @@ async def test_a_trip_cancelled_as_a_whole_takes_no_new_guest_hold_or_payment(
     assert (await client.post(f"/api/guest/{token}/deposit/test-card")).status_code == 200
 
     await _cancel(operator, trip["id"], "rest", 1)
-    opens = datetime.combine(starts - timedelta(days=26), datetime.min.time(), UTC)
-    await _tick(conn, paypal, opens + timedelta(hours=1))
+    await _tick(conn, paypal)
     late_invite = await operator.post(f"/api/trips/{trip['id']}/guests", json={"name": "Bo"})
     late_pay = await client.post(f"/api/guest/{token}/balance/test-card")
 

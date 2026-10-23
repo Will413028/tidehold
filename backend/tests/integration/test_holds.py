@@ -245,3 +245,18 @@ async def test_the_trip_timeline_lists_each_guests_money_events(
         ("Ana", "balance", "payment_created"),
         ("Ana", "deposit", "open_succeeded"),
     ]
+
+
+async def test_a_guest_invited_before_the_balance_was_payable_from_invitation_has_none(
+    operator: AsyncClient, client: AsyncClient, conn: Conn
+) -> None:
+    """Migration 0015 created no balance payment for such a guest (developer, 2026-10-23)."""
+    token = await _invite(operator, TRIP)
+    await conn.execute("update guests set balance_payment_id = null where token = %s", (token,))
+
+    balance = (await client.get(f"/api/guest/{token}")).json()["balance"]
+    paid = await client.post(f"/api/guest/{token}/balance/test-card")
+
+    assert (balance["payment"], balance["amount_minor"]) == (None, 30000)
+    assert "due_on" in balance
+    assert (paid.status_code, paid.json()) == (409, {"detail": "NO_BALANCE_PAYMENT"})

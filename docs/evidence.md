@@ -46,12 +46,12 @@ Read: NWS gale and storm warnings and MeteoAlarm wind warnings are recorded trig
 
 ### Coverage after the D18 rewrite (2026-10-23, report only)
 
-`make coverage` on `feat/step6-balance-before-trip` (269 backend tests, PostgreSQL 18 in a container; run in the implementing cloud session, to be rerun locally), money, holds and settlement:
+`make coverage` on `feat/step6-balance-before-trip` (270 backend tests, PostgreSQL 18 in a container; run in the implementing cloud session, to be rerun locally), money, holds and settlement:
 
 ```
 Name                                   Stmts   Miss Branch BrPart  Cover
 src/tidehold/holds/__init__.py             0      0      0      0   100%
-src/tidehold/holds/http.py                86      1      8      2    97%
+src/tidehold/holds/http.py                86      0      8      0   100%
 src/tidehold/holds/schedule.py             8      0      0      0   100%
 src/tidehold/money/__init__.py             0      0      0      0   100%
 src/tidehold/money/amounts.py              3      0      0      0   100%
@@ -68,10 +68,10 @@ src/tidehold/settlement/matching.py       20      0      2      0   100%
 src/tidehold/settlement/plan.py           35      2     12      3    89%
 src/tidehold/settlement/proposals.py     195     13     66     11    90%
 src/tidehold/settlement/watch.py          73      5     24      5    90%
-TOTAL                                   1613     95    432     60    92%
+TOTAL                                   1613     94    432     58    92%
 ```
 
-Read: `holds/http.py`'s uncovered line and branch are a guest without a balance payment (only guests invited before migration 0015; `NO_BALANCE_PAYMENT`).
+Read: `holds` is fully covered, including a guest without a balance payment (invited before migration 0015; `NO_BALANCE_PAYMENT`, added after the closing review). `money` and `settlement` are unchanged by this step.
 
 ### Mutation of the D18 rewrite (2026-10-23, cloud session)
 

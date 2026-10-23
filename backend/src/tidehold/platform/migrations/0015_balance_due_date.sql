@@ -7,7 +7,9 @@
 
 -- A balance opened before this migration, never paid and never sent to PayPal, is paid as a
 -- capture like every new one (the guest page's checkout now loads PayPal for CAPTURE only).
--- One with a command keeps its AUTHORIZE order, so a reconcile reads the order it placed.
+-- One with a command keeps its AUTHORIZE order, so a reconcile reads the order it placed; if
+-- that command closed without placing it, the guest can pay it only with the sandbox test
+-- card (local development databases only, no deployment yet).
 update payments p set intent = 'capture'
     where p.purpose = 'balance' and p.state = 'pending' and p.intent = 'authorize'
       and not exists (select 1 from money_commands c where c.payment_id = p.id);

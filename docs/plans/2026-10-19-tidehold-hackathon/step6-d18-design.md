@@ -1,6 +1,6 @@
 # Step 6 (D18) design: the balance payable from invitation, due before the trip
 
-Plan step 6, "Scope (D18, rewritten 2026-10-23)" and "Acceptance (D18)" (`../2026-10-19-tidehold-hackathon.md`); ADR `docs/adr/2026-10-23-balance-paid-before-trip-weather-refunds.md` D1 and the amendment (bounds); D20. Written 2026-10-23 at 4545866, before building; reviewed at start and before commit (findings at the end).
+Plan step 6, "Scope (D18, rewritten 2026-10-23)" and "Acceptance (D18)" (`../2026-10-19-tidehold-hackathon.md`); ADR `docs/adr/2026-10-23-balance-paid-before-trip-weather-refunds.md` D1 and the amendment (bounds); D20. Written 2026-10-23 at 4545866, before building; reviewed at start and at the close (findings at the end).
 
 Step 6 changes when and how a balance is created; it does not change settlement (8b) or remove the hold code (8c). `make check` stays green at every commit.
 
@@ -65,7 +65,7 @@ Step 6 changes when and how a balance is created; it does not change settlement 
   - `tests/unit/test_schedule.py`: `test_the_balance_falls_due_its_days_before_the_first_local_trip_day` (exact UTC instants for 3-day trips in `Asia/Manila`, `America/Los_Angeles`, and Los Angeles on 2026-11-01, the day US daylight saving time ends; review finding 7), `test_a_trip_booked_after_its_due_date_is_due_at_once` (a guest invited 10 days before a 30-day due date), `test_a_zero_day_balance_falls_due_when_the_first_local_trip_day_begins`.
   - `tests/integration/test_holds.py`: `test_a_guest_gets_its_balance_payment_at_invitation` (pending, `intent = 'capture'`, guest view `due_on`, for a trip starting 60 days from today so the test does not age; review finding 3), `test_the_balance_is_captured_when_the_guest_pays` (test card and checkout: `captured`, every PayPal order `CAPTURE`), `test_balance_due_days_outside_0_to_120_are_refused` (−1, 121, "30", 30.0 → 400), `test_balance_due_days_at_their_bounds_are_accepted` (0, 120).
   - `tests/integration/test_thin_path.py`: `test_a_trip_of_the_longest_allowed_length_is_accepted_and_one_longer_is_refused` (21 → 201 and its day 21 can be cancelled, 22 → 400).
-- Counts (`quality-lock.json`): backend-unit 98 → 92 (−11, +5), backend-integration 172 → 177 (−4, +9 with parametrized cases), web 20 → 21, e2e 12.
+- Counts (`quality-lock.json`): backend-unit 98 → 92 (−11, +5), backend-integration 172 → 178 (−4, +9 with parametrized cases, +1 after the closing review), web 20 → 21, e2e 12.
 - Mutation: compute the due date from the last trip day → `test_the_balance_falls_due_its_days_before_the_first_local_trip_day` fails.
 - Acceptance outside the tests: `make coverage` read and recorded in `docs/evidence.md`; the browser check of the sandbox checkouts is the developer's (plan "Needs a human"), with its steps in `docs/evidence.md`; the plan's Progress row for step 6 (review finding 5).
 
@@ -84,3 +84,17 @@ An independent reviewer (a subagent that wrote none of this) read this design ag
 | 7 | "One second before" assertion holds for any value | LOW | Changed: exact instants, plus the DST day |
 | 8 | e2e and console wording not pinned; `GuestsSection.tsx` "not open" | LOW | Changed: the strings are named; "no payment" |
 | 9 | Pending `authorize` balances in local databases fail the CAPTURE-only checkout | LOW | Changed: 0015 sets such a balance without commands to `capture` (an intent change, not the backfill the developer declined) |
+
+## Closing review (2026-10-23)
+
+A second independent reviewer read the diff at f00b0f4 against this design, the plan and `AGENTS.md`: no HIGH or MED finding; 5 LOW, all fixed in the next commit.
+
+| # | Finding | Severity | Disposition |
+|---|---|---|---|
+| 1 | `docs/threat-model.md`'s validity row still described holds at T-(29 − N) and a 10-day limit in its control column | LOW | Fixed: the control says no hold is opened, the 21-day input bound, and that pre-0015 holds remain until 8c |
+| 2 | `test_a_trip_cancelled_as_a_whole_takes_no_new_guest_hold_or_payment` still ticked at the old opening time | LOW | Fixed: it ticks now |
+| 3 | The plan's Progress row for step 6 not updated | LOW | Fixed: the row records the D18 acceptance run and what is pending |
+| 4 | A pre-0015 `authorize` balance whose command closed without an order can be paid only by the test card | LOW | Recorded in migration 0015's comment (local databases only) |
+| 5 | No backend test for a guest without a balance payment (`NO_BALANCE_PAYMENT`) | LOW | Fixed: `test_a_guest_invited_before_the_balance_was_payable_from_invitation_has_none`; backend-integration 177 → 178 |
+
+The reviewer also noted that `AGENTS.md` says commits go to `main`; the developer asked for this step on `feat/step6-balance-before-trip`.
