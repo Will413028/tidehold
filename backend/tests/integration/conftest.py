@@ -34,7 +34,7 @@ def _truncate(database_url: str) -> None:
         conn.execute(
             "truncate due_actions, credits, payment_waivers, money_commands, proposals,"
             " cancellations, guests, payment_events, payments, trips, policy_versions, model_calls,"
-            " warning_replays, official_warnings, corroborations, workspaces"
+            " warning_replays, official_warnings, corroborations, workspaces, workspace_creations"
         )
 
 

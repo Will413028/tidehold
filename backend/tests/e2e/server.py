@@ -74,7 +74,13 @@ def main() -> None:
         model.answer(POLICY["wording"], POLICY["rules"], [])
         model.answer(GALE_WORDING, [GALE_RULE], [])
         model.event_values = ["Gale Warning"]
-        settings = Settings(database_url=url, public_origin=ORIGIN, run_worker=True)
+        # every browser of the suite comes from loopback: one address, many workspaces
+        settings = Settings(
+            database_url=url,
+            public_origin=ORIGIN,
+            run_worker=True,
+            workspace_daily_cap_per_address=10_000,
+        )
         app = create_app(
             settings,
             paypal=FakePayPal().client(),
