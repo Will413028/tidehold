@@ -52,6 +52,19 @@ docker compose -p tidehold -f compose.yaml up -d
 docker compose -p tidehold -f compose.yaml logs ts   # the login URL, approved once
 ```
 
+The image's containerboot gives `tailscale up` 60 seconds and then restarts the container with a new login URL, so a URL from `logs ts` is valid for about a minute. To get one that stays valid, log the node in with `tailscaled` alone on the same state volume, then start `ts` normally (done this way on 2026-10-25):
+
+```sh
+docker compose -p tidehold -f compose.yaml stop ts
+docker compose -p tidehold -f compose.yaml run -d --no-deps --name tidehold-ts-login \
+  --entrypoint tailscaled ts --tun=userspace-networking --statedir=/var/lib/tailscale \
+  --socket=/tmp/ts-login.sock
+docker exec tidehold-ts-login tailscale --socket=/tmp/ts-login.sock up \
+  --hostname=tidehold --advertise-tags=tag:tidehold-demo   # prints the URL; approve it
+docker rm -f tidehold-ts-login
+docker compose -p tidehold -f compose.yaml up -d ts
+```
+
 ## Every night, and new revisions
 
 `tidehold-nightly.timer` (11:00 UTC) runs `nightly.sh`: stop `web` and `api`, run `audit`, remove the app and the database (`tidehold_db-data`), `up -d`. A failed audit (a mismatch, a command still open, a failed read) also writes a dump of the money tables next to its log, and the script exits non-zero after the rebuild. The log is `reconcile-<date>.jsonl` on the `tidehold_reconcile-log` volume:
