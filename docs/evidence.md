@@ -129,9 +129,15 @@ Read: `holds` is fully covered, including a guest without a balance payment (inv
 |---|---|
 | Due date counted from the last trip day (`starts_on + days - 1`) | `test_the_balance_falls_due_its_days_before_the_first_local_trip_day` (all three cases), `test_a_zero_day_balance_falls_due_when_the_first_local_trip_day_begins`, `test_a_guest_gets_its_balance_payment_at_invitation` |
 
-### Browser check of the PayPal checkouts (pending: needs the developer)
+### Browser check of the PayPal checkouts (2026-10-24)
 
-Not run: needs the sandbox credentials on a stack the developer's browser reaches. To record here: the date, commit, and for the deposit and then the balance of one guest: PayPal's popup opened from "Pay the deposit" and "Pay the balance", the sandbox buyer approved, the page showing "Deposit: USD …: paid" and "Balance: USD …: paid", and the trip's timeline listing `open_succeeded` for both payments.
+Run on `3c9a05a` plus the token fix below, on the local stack: backend on PostgreSQL 18 in Docker with the sandbox app's credentials, web as a production build (`pnpm build && pnpm start`; `next dev` refuses the 127.0.0.1 origin's dev resources, so the page never hydrates), opened in Chrome at `http://127.0.0.1:3000` with `PUBLIC_ORIGIN` matching. The policy was compiled through Claude Sonnet 5.5 and published; trip "Checkout check" (2026-12-20, 2 days, NWS PKZ012, deposit USD 50, balance USD 300 due 2026-11-20), one guest.
+
+- PayPal's JS SDK rendered "Pay with PayPal" and "Debit or Credit Card" for "Pay the deposit"; "Pay with PayPal" opened PayPal's checkout window (not completed: a sandbox buyer login is the developer's to enter).
+- Deposit, then balance, through PayPal's own card form ("Debit or Credit Card", guest checkout, fictional billing details, Fastlane not saved) with PayPal's published sandbox Visa 4012 0000 7777 7777: the page showed "Deposit: USD 50.00: paid", then "Balance: USD 300.00: paid"; both payments `captured` (5000 and 30000 minor units).
+- The trip's timeline listed `deposit · open_succeeded` (03:17:19 UTC) and `balance · open_succeeded` (03:18:26 UTC).
+- PayPal's card form declined 4111 1111 1111 1111 (the server-side `TEST_CARD`, which the API accepts); that number is not on PayPal's published list for card fields.
+- Found: after the Mac slept, every order creation was refused (`open_rejected`, `PAYPAL_REJECTED` with no order): the client timed its cached access token by `time.monotonic()`, which macOS stops during sleep, so it kept sending a token PayPal had expired. Fixed in the same push: the expiry runs on the wall clock, and a 401 replaces the token and sends the request once more under the same `PayPal-Request-Id` (`test_a_token_paypal_no_longer_accepts_is_replaced_and_the_request_sent_once_more`, `test_a_token_expires_by_the_wall_clock_so_a_sleeping_host_does_not_reuse_it`; mutations: no resend, monotonic clock, keep the stale token: each fails its test).
 
 ## Step 4: money engine port
 
