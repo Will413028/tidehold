@@ -54,7 +54,11 @@ The product contract said settlements are triggered by official CAP warnings fro
 
 - Settlement code has no model call; replaying (policy version, rulings, cancellations with their recorded answers, operator approvals, evidence) reproduces every outcome.
 - Step 2 measures compile quality (rules, needs-ruling precision and recall, event-set proposals), not runtime matching.
-- A warning with no cancellation produces an ask, never money movement; the demo shows one operator click between the replayed warning and the void.
+- A warning with no cancellation produces an ask, never money movement; the demo shows one operator click between the replayed warning and the refunds.
+
+## Review Notes
+
+- 2026-10-24 (plan step 8c, D18): Expected Outcome read "… and the void"; with no hold there is no void, and the cancellation settles as refunds or credit.
 
 ## Revocation Triggers
 

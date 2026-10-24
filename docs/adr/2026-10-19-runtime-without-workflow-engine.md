@@ -56,6 +56,7 @@ tidehold must act at specific times per trip: request the balance hold at T-(29 
 
 - 2026-10-19 (plan step 6): "the demo can advance a workspace's clock to the next action" is superseded by D12 (trips and holds use real time; recorded warnings are replayed with an offset). The worker passes the wall clock into every claim; tests pass their own.
 - 2026-10-20 (plan D17): "cancellation marks pending actions superseded" is replaced by state checks: every handler re-reads trip state before acting, which an action already running needs anyway; no `superseded` state is added, since nothing reads it.
+- 2026-10-24 (plan step 8c, D18): the balance hold, its reauthorization and finalize named in Context no longer exist; the timed work is the balance due date, the unpaid-balance ask and settlement. "One live command per kind" now reads: one live open attempt per payment and one live refund per proposal and payment, with a payment's refunds bounded by its capture. The decision stands.
 
 ## Related
 
