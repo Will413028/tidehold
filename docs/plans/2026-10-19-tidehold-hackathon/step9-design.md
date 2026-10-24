@@ -1,6 +1,6 @@
 # Step 9 design: operator console and guest page (the part 8a backs)
 
-Plan step 9 (`../2026-10-19-tidehold-hackathon.md`), requirements R12 and R13 (`requirements.md`), decisions D10 (AG Grid), D12 (replay), D15 (do-not-enter-real-data notice) and D16. Written 2026-10-20 at fcb7225, before building; revised after the start-of-change design review (9 findings: 7 changed, 1 recorded, 1 decided by the developer; listed at the end). Step 9 starts before 8b by the developer's choice of 2026-10-20: 8b waits for step 4's day-4 reauthorization check (not before 2026-10-23 12:25 UTC). Everything here reads data 8a already stores; the finalize, capture and reauthorization screens wait for 8b (listed under "Waits for 8b").
+Plan step 9 (`../2026-10-19-tidehold-hackathon.md`), requirements R12 and R13 (`requirements.md`), decisions D10 (AG Grid), D12 (replay), D15 (do-not-enter-real-data notice) and D16. Written 2026-10-20 at fcb7225, before building; revised after the start-of-change design review (9 findings: 7 changed, 1 recorded, 1 decided by the developer; listed at the end). Step 9 starts before 8b by the developer's choice of 2026-10-20: 8b waits for step 4's day-4 reauthorization check (not before 2026-10-23 12:25 UTC). Everything here reads data 8a already stores; the finalize, capture and reauthorization screens wait for 8b (listed under "Waits for 8b"; D18 removed them, and that section became "D18 screens" on 2026-10-24).
 
 Dependencies approved by the developer on 2026-10-20: `ag-grid-community` and `ag-grid-react` 36.2.0 (released 2026-09-16), `@playwright/test` 1.64.0 (2026-10-07; 1.64.1 is inside the one-week rule).
 
@@ -66,10 +66,22 @@ Routes (`app` imports a feature only through its `index.ts`):
 
 Units 4–6 touch different features and could run in parallel; they are kept serial because each extends the e2e from unit 3.
 
-## Waits for 8b
+## D18 screens (rewritten 2026-10-24 from "Waits for 8b", per plan step 9 Scope)
 
-- Finalize state per guest (captured, voided, reauthorized), the finalize proposal, refused-capture asks with the new checkout link, and the post-finalize cancellation ask: the grids and the guest page get these columns and states when 8b lands.
-- `GET /failed-actions` finds payment actions through the guests' current deposit and balance payments, as the timeline does; when 8b adds `payments.guest_id` (a guest's second payment of a purpose), both queries move to it, with a test that a failed action of the first payment still shows.
+D18 removed holds, so the finalize, capture and reauthorization screens this section used to list are gone with them. What step 9 shows instead, and where each item landed:
+
+| Item | Where | Landed |
+|---|---|---|
+| Guest page: each payment paid with its refunds; "Pay the balance"; no held or released-hold states | `GuestTrip.tsx`, `GuestPayments.tsx`, `GuestSettlements.tsx`, `guest/types.ts` | 8b (`fe79789`), 8c (`0cf0248`) |
+| Guest page: the balance due after refunded days, and a released guest's state | `GuestTrip.tsx`, `next-payment.ts` | 8b (`fe79789`) |
+| Proposal lines read "refund" for both purposes | `proposal-view.ts` | 8b (`fe79789`) |
+| e2e demo path asserts refunds instead of a release | `web/e2e/demo-path.spec.ts` | 8b (`996b5fa`) |
+| Rule editor shows each deduction's quote | `RemedyEditor.tsx` | 5b (`7d8dfe1`) |
+| Answers for the `unpaid_balance` ask (wait, release) and the `command_open` ask (found, not found), from one table that mirrors the backend's `ANSWERS`; titles for `command_open` and a `money_refused` past the refund window | `proposal-view.ts`, `DecisionPanel.tsx` | step 9 (`cc299c6`) |
+| Trip form takes `balance_due_days` (0 to 120, default 30, D20) | `TripForm.tsx`, `trip-form.ts` | step 9 (`7304d78`) |
+| Guests grid: paid, refunded and credited amounts, and released guests; credit read from `GET /trips/{id}/credits`, since credits belong to `settlement` and `trips` sits below it | `GuestsSection.tsx`, `guest-rows.ts`, `trips/http.py`, `settlement/http.py` | step 9 (`c5cf5d7`) |
+
+`GET /failed-actions` keeps finding payment actions through the guest's deposit and balance payments. The condition for moving it to a `payments.guest_id` (a guest's second payment of a purpose) does not arise under D18: each guest gets one payment per purpose at invitation, `guests.balance_payment_id` is `not null` since migration 0016, and no code reassigns either id (checked 2026-10-24: `rg -n "(deposit|balance)_payment_id\s*=" backend/src` finds only 0016's backfill).
 
 ## Recorded for later steps
 
@@ -95,7 +107,7 @@ Units 4–6 touch different features and could run in parallel; they are kept se
 | Finding | Disposition |
 |---|---|
 | Guest amounts shown only inside the explanation, which step 11's draft replaces | Changed: the sentence carries no amount; the web shows outcomes from the stored lines; threat-model line with tests |
-| Failed payment actions found through the current payments only | Recorded: Waits for 8b |
+| Failed payment actions found through the current payments only | Recorded: Waits for 8b; closed 2026-10-24 under "D18 screens" (one payment per purpose per guest) |
 | 1-2 s per API call handled by a longer e2e timeout | Recorded: step 10 measurement before any pool |
 | `autoHeight` and device emulation worked around, not explained | Recorded: step 10 real-phone check |
 | Operator wording repeats the backend's | Recorded: step 11 |
