@@ -23,6 +23,7 @@ from tidehold.money import audit
 from tidehold.money.paypal import PayPalClient, ReadOnlyTransport
 from tidehold.platform.db import connect
 from tidehold.platform.settings import (
+    PayPalCredentials,
     database_url_from_env,
     paypal_from_env,
     reconcile_log_dir_from_env,
@@ -45,13 +46,16 @@ def write_log(directory: Path, rows: list[audit.Row], at: datetime) -> dict[str,
     return summary
 
 
+def read_only_client(
+    credentials: PayPalCredentials, inner: httpx.AsyncBaseTransport | None = None
+) -> PayPalClient:
+    """The audit's client: whatever calls it, only reads and the token request get through."""
+    transport = ReadOnlyTransport(inner or httpx.AsyncHTTPTransport())
+    return PayPalClient(credentials.client_id, credentials.client_secret, transport=transport)
+
+
 async def _main() -> int:
-    credentials = paypal_from_env()
-    client = PayPalClient(
-        credentials.client_id,
-        credentials.client_secret,
-        transport=ReadOnlyTransport(httpx.AsyncHTTPTransport()),
-    )
+    client = read_only_client(paypal_from_env())
     try:
         async with await connect(database_url_from_env()) as conn:
             rows = await audit.run(conn, client)

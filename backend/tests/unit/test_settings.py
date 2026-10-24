@@ -37,6 +37,8 @@ def test_the_database_password_can_come_from_a_file(
     parts = conninfo_to_dict(database_url_from_env())
 
     assert parts["password"] == written
+    settings = Settings(database_url=database_url_from_env(), public_origin="https://t.example")
+    assert written not in repr(settings)
     assert (parts["user"], parts["host"], parts["dbname"]) == ("tidehold", "db", "tidehold")
 
 

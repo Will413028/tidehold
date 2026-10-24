@@ -12,15 +12,17 @@ How it reads PayPal: one `GET /v2/checkout/orders/{id}` per distinct order (an o
 
 Verdict per command (`match`, `mismatch`, `open`, `unread`):
 
+"Captured" is PayPal's capture status COMPLETED, PARTIALLY_REFUNDED or REFUNDED (a capture keeps its money when refunded, and its status changes); "moving" adds PENDING.
+
 | Command | Local status | PayPal shows | Verdict |
 |---|---|---|---|
-| open | succeeded | a COMPLETED capture with the payment's `capture_id` and the command's amount | match; anything else mismatch |
-| open | rejected | no capture on the command's order (or no order id: never reached PayPal) | match; a capture is mismatch |
+| open | succeeded | a captured capture with the payment's `capture_id` and the command's amount | match; anything else mismatch |
+| open | rejected | nothing moving on the command's order (or no order id) | match, or not_readable when it was sent and has no order id; anything moving is mismatch |
+| open / refund | pending, never sent (an abandoned checkout) | nothing moving | not_sent (listed, does not fail the run); anything moving is mismatch |
 | refund | succeeded | a refund with the command's `refundId` or `invoice_id`, COMPLETED, same amount | match; missing, other status or amount is mismatch (the seeded case) |
-| refund | rejected | no COMPLETED refund with its `invoice_id` | match; a COMPLETED one is mismatch |
-| open | rejected, sent, no order id | nothing to read (PayPal refused the order's creation) | not_readable |
-| any | pending / unknown | whatever the order shows | open: listed with PayPal's state. The worker is stopped for the audit and the rebuild drops the command, so nothing settles it afterwards; it counts as a failure (exit 1) |
-| any | — | the order read failed | unread (exit 1) |
+| refund | rejected | no COMPLETED or PENDING refund with its `invoice_id` | match; one is mismatch |
+| any | pending (sent) / unknown | whatever the order shows | open: the worker is stopped for the audit and the rebuild drops the command, so nothing settles it afterwards; fails the run |
+| any | — | the order read failed | unread (fails the run) |
 
 Per payment, also: `captured_minor` equals the COMPLETED capture's amount, `refunded_minor` equals the sum of COMPLETED refunds, and every refund PayPal lists has a command (a refund at PayPal with no command is a mismatch). These catch money PayPal moved that no command explains.
 
@@ -93,3 +95,7 @@ A fresh subagent reviewed this file against the fallback's `deploy/deposits-demo
 - Images reference `tag@sha256:digest`, so Dependabot's `docker` and `docker-compose` ecosystems can update them.
 - `net` is not removed by `nightly.sh` (as in the fallback's script): `web` and `api` join its namespace again on `up`.
 - Measured locally with the compose project (dummy credentials, the warning fixtures in place of `/var/lib/tidehold-recorder`, no `ts`): migrate applied 0001–0018, ingest stored 260 warnings, `web` served 200; 21 workspace creations sent to `web` with `X-Forwarded-For: 203.0.113.50` gave 20 × 201 then 429, and another address 201, so Next and uvicorn carry the header as section 2 reads; the audit on an empty database logged 0 rows and exited 0; with a seeded pending open command it exited 1 with an `open` row, and the dump pipeline of `nightly.sh` wrote `money-<stamp>.sql` holding that command to the kept volume. Not measured locally: `nightly.sh` end to end (its `sed -i` is GNU sed, the VM's) and Tailscale Funnel's `X-Forwarded-For`; both are 10b.
+
+## Code review before done (2026-10-25, 56fd600..98beb8f)
+
+An independent reviewer found no HIGH defect; 2 MED and 5 LOW. Fixed: a never-sent pending command (an abandoned checkout) failed the run, so judges closing a checkout tab would fail most nights; it is now `not_sent` unless PayPal shows money on it. A rejected attempt or refund with money still PENDING at PayPal was a match; it is a mismatch. While fixing the second, the author found a worse one the reviewer and the fake missed: a refunded capture's status becomes PARTIALLY_REFUNDED or REFUNDED (Payments v2 capture status, PayPal server SDK docs), so any day with a refund would have reported its capture missing; captured now means those three statuses (`test_a_refunded_capture_still_counts_as_captured`, which fails when only COMPLETED counts). Also fixed: a test that the CLI's client is the read-only one, `Settings.database_url` hidden from `repr` now that it can carry the password, a wrong comment. Rejected: an order answer that is not a JSON object crashes the run instead of `unread`; the crash exits non-zero, so `nightly.sh` keeps the dump and the timer fails, which is the same outcome. CI's first run failed on `scripts/test_deploy.py`: `docker compose config` exited 1 on the runner and the test did not show its stderr (suspected, not confirmed: the version-dependent `--no-env-resolution` flag); the test now resolves marker env files in a temporary directory and prints compose's stderr on failure.

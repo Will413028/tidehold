@@ -11,7 +11,8 @@ DEFAULT_COMPILE_MODEL = "anthropic:claude-sonnet-5-5"
 
 @dataclass(frozen=True)
 class Settings:
-    database_url: str
+    # may carry the password (DATABASE_PASSWORD_FILE), so it is never shown
+    database_url: str = field(repr=False)
     # The one origin browsers use (the web app, which proxies /api); state-changing requests
     # from any other origin are refused.
     public_origin: str

@@ -4,6 +4,7 @@ import time
 import httpx2 as httpx
 import pytest
 
+from tidehold.bootstrap import nightly_audit
 from tidehold.money.paypal import (
     SANDBOX_API,
     PayPalClient,
@@ -16,7 +17,7 @@ from tidehold.money.paypal import (
     refunds_of,
     usd,
 )
-from tidehold.platform.settings import Settings, paypal_from_env
+from tidehold.platform.settings import PayPalCredentials, Settings, paypal_from_env
 
 TOKEN = httpx.Response(200, json={"access_token": "t", "expires_in": 3600})
 
@@ -220,3 +221,19 @@ async def test_the_read_only_transport_reads_but_never_sends() -> None:
         ("POST", "/v1/oauth2/token"),
         ("GET", "/v2/checkout/orders/O1"),
     ]
+
+
+async def test_the_nightly_audit_client_is_read_only() -> None:
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return TOKEN
+
+    client = nightly_audit.read_only_client(
+        PayPalCredentials("id", "secret"), httpx.MockTransport(handle)
+    )
+
+    with pytest.raises(ReadOnlyRefused):
+        await client.capture_order("O1", request_id="tidehold-open-1")
+    assert [r.url.path for r in seen] == ["/v1/oauth2/token"]

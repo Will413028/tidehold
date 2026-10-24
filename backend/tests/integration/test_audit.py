@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
+import pytest
 from psycopg.rows import DictRow
 
 from tests.integration.fake_paypal import FakePayPal
@@ -147,3 +148,66 @@ async def test_the_evidence_log_holds_every_row_and_a_summary(conn: Conn, tmp_pa
     assert str(command["id"]) in {line.get("command_id") for line in lines}
     assert lines[-1] == summary
     assert summary["failed"] is False
+
+
+async def test_a_refunded_capture_still_counts_as_captured(conn: Conn) -> None:
+    fake = FakePayPal()
+    payment_id = await _paid(conn, fake, "deposit")
+    await _refund(conn, fake, payment_id, 30000)
+    # PayPal reports a fully refunded capture as REFUNDED (Payments v2 capture status)
+    order = fake.orders[(await commands.payment(conn, payment_id))["order_id"]]
+    order["purchase_units"][0]["payments"]["captures"][0]["status"] = "REFUNDED"
+
+    rows = await audit.run(conn, fake.client())
+
+    assert {r.verdict for r in rows} == {"match"}
+
+
+async def test_an_abandoned_checkout_is_listed_but_does_not_fail_the_run(conn: Conn) -> None:
+    fake = FakePayPal()
+    workspace_id, _ = await new_workspace(conn)
+    payment_id = await commands.create_payment(
+        conn, workspace_id=workspace_id, purpose="deposit", amount_minor=30000
+    )
+    await service.start_checkout(conn, fake.client(), payment_id, daily_cap=CAP)
+
+    rows = await audit.run(conn, fake.client())
+
+    assert [(r.check, r.verdict) for r in rows] == [("open", "not_sent")]
+    assert not audit.failed(rows)
+
+
+async def test_money_on_an_attempt_recorded_as_rejected_is_reported(conn: Conn) -> None:
+    fake = FakePayPal()
+    workspace_id, _ = await new_workspace(conn)
+    payment_id = await commands.create_payment(
+        conn, workspace_id=workspace_id, purpose="deposit", amount_minor=30000
+    )
+    order_id = await service.start_checkout(conn, fake.client(), payment_id, daily_cap=CAP)
+    await conn.execute(
+        "update money_commands set status = 'rejected', sent_at = now(), completed_at = now()"
+        " where payment_id = %s",
+        (payment_id,),
+    )
+    fake.capture_status = "PENDING"  # in flight still counts
+    fake._capture(fake.orders[order_id], fake.orders[order_id]["amount"])
+
+    rows = await audit.run(conn, fake.client())
+
+    assert [(r.verdict, r.reason) for r in rows] == [("mismatch", "CAPTURED_BUT_REJECTED")]
+
+
+async def test_a_card_paypal_refused_before_any_order_is_not_readable(conn: Conn) -> None:
+    fake = FakePayPal()
+    fake.refuse.add("orders")
+    workspace_id, _ = await new_workspace(conn)
+    payment_id = await commands.create_payment(
+        conn, workspace_id=workspace_id, purpose="deposit", amount_minor=30000
+    )
+    with pytest.raises(service.PaymentRefused):
+        await service.pay_with_test_card(conn, fake.client(), payment_id, TEST_CARD, daily_cap=CAP)
+
+    rows = await audit.run(conn, fake.client())
+
+    assert [r.verdict for r in rows] == ["not_readable"]
+    assert not audit.failed(rows)

@@ -24,9 +24,14 @@ from tidehold.money.paypal import (
 )
 from tidehold.platform.db import Conn
 
-# `open`: PayPal's outcome was never settled; the rebuild drops the command unsettled.
+# `open`: sent, but PayPal's outcome was never settled; the rebuild drops it unsettled.
+# `not_sent`: recorded but never sent (an abandoned checkout), and PayPal shows no money moved.
 # `not_readable`: a command PayPal refused before an order existed, so nothing can be read.
-Verdict = Literal["match", "mismatch", "open", "unread", "not_readable"]
+Verdict = Literal["match", "mismatch", "open", "unread", "not_sent", "not_readable"]
+# PayPal's capture statuses (Payments v2): money that reached the merchant stays captured when
+# refunded (PARTIALLY_REFUNDED, REFUNDED); PENDING is money still in flight.
+CAPTURED = frozenset({"COMPLETED", "PARTIALLY_REFUNDED", "REFUNDED"})
+MOVING = CAPTURED | {"PENDING"}
 FAILING: frozenset[Verdict] = frozenset({"mismatch", "open", "unread"})
 
 
@@ -66,8 +71,13 @@ class _Order:
     refunds: list[Refund]
 
     @property
-    def completed_captures(self) -> list[Capture]:
-        return [c for c in self.captures if c.status == "COMPLETED"]
+    def captured(self) -> list[Capture]:
+        return [c for c in self.captures if c.status in CAPTURED]
+
+    @property
+    def moving(self) -> list[Capture]:
+        """Captured, or still in flight: money a rejected or unsent attempt must not show."""
+        return [c for c in self.captures if c.status in MOVING]
 
 
 class _Orders:
@@ -106,51 +116,59 @@ def _local(command: DictRow) -> dict[str, Any]:
     return {"status": command["status"], "amount_minor": command["amount_minor"]}
 
 
+def _without_order(command: DictRow, *, unsent: bool) -> tuple[Verdict, str | None]:
+    """An attempt with no order id: PayPal can show nothing for it."""
+    if unsent:
+        return "not_sent", None  # abandoned before its order existed
+    if command["status"] == "rejected" and command["sent_at"] is None:
+        return "match", None  # replaced, or refused before its order existed
+    if command["status"] == "rejected":
+        return "not_readable", None  # sent, and PayPal refused it before creating an order
+    if command["status"] == "unknown":
+        return "open", None
+    return "mismatch", "NO_ORDER_ID"
+
+
+def _on_order(
+    command: DictRow, payment: DictRow, order: _Order, *, unsent: bool
+) -> tuple[Verdict, str | None]:
+    match command["status"]:
+        case "succeeded":
+            ours = [c for c in order.captured if c.capture_id == payment["capture_id"]]
+            if not ours:
+                return "mismatch", "CAPTURE_MISSING"
+            if ours[0].amount_minor != command["amount_minor"]:
+                return "mismatch", "CAPTURE_AMOUNT_DIFFERS"
+            return "match", None
+        case "rejected":
+            return ("mismatch", "CAPTURED_BUT_REJECTED") if order.moving else ("match", None)
+        case _ if unsent:
+            return ("mismatch", "CAPTURED_BUT_UNSENT") if order.moving else ("not_sent", None)
+        case _:
+            return "open", None
+
+
 async def _open(orders: _Orders, command: DictRow, payment: DictRow) -> Row:
     local = _local(command)
+    unsent = command["status"] == "pending" and command["sent_at"] is None
     order_id = _order_of_open(command)
     if order_id is None:
-        reason = None
-        if command["status"] in ("pending", "unknown"):
-            verdict: Verdict = "open"
-        elif command["status"] == "rejected" and command["sent_at"] is None:
-            verdict = "match"  # replaced before it reached PayPal
-        elif command["status"] == "rejected":
-            verdict = "not_readable"  # PayPal refused it before creating an order
-        else:
-            verdict, reason = "mismatch", "NO_ORDER_ID"
+        verdict, reason = _without_order(command, unsent=unsent)
         return _row(payment, "open", verdict, command_id=command["id"], reason=reason, local=local)
     order = await orders.get(order_id)
     if order is None:
         return _row(payment, "open", "unread", command_id=command["id"], local=local)
-    completed = order.completed_captures
     shown = {
         "order": order_id,
         "status": order.status,
-        "captures": [{"id": c.capture_id, "amount_minor": c.amount_minor} for c in completed],
+        "captures": [
+            {"id": c.capture_id, "status": c.status, "amount_minor": c.amount_minor}
+            for c in order.captures
+        ],
     }
-    reason = None
-    match command["status"]:
-        case "succeeded":
-            ours = [c for c in completed if c.capture_id == payment["capture_id"]]
-            if not ours:
-                reason = "CAPTURE_MISSING"
-            elif ours[0].amount_minor != command["amount_minor"]:
-                reason = "CAPTURE_AMOUNT_DIFFERS"
-        case "rejected":
-            reason = "CAPTURED_BUT_REJECTED" if completed else None
-        case _:
-            return _row(
-                payment, "open", "open", command_id=command["id"], local=local, paypal=shown
-            )
+    verdict, reason = _on_order(command, payment, order, unsent=unsent)
     return _row(
-        payment,
-        "open",
-        "mismatch" if reason else "match",
-        command_id=command["id"],
-        reason=reason,
-        local=local,
-        paypal=shown,
+        payment, "open", verdict, command_id=command["id"], reason=reason, local=local, paypal=shown
     )
 
 
@@ -172,24 +190,27 @@ def _refund(command: DictRow, payment: DictRow, refunds: list[Refund] | None) ->
         if found is None
         else {"refund": found.status, "amount_minor": found.amount_minor}
     )
-    reason = None
+    # COMPLETED moved money; PENDING is still moving it
+    moving = found is not None and found.status in ("COMPLETED", "PENDING")
+    verdict: Verdict = "match"
+    reason: str | None = None
     match command["status"]:
-        case "succeeded":
-            if found is None or found.status != "COMPLETED":
-                reason = "REFUND_MISSING"
-            elif found.amount_minor != command["amount_minor"]:
-                reason = "REFUND_AMOUNT_DIFFERS"
-        case "rejected":
-            completed = found is not None and found.status == "COMPLETED"
-            reason = "REFUNDED_BUT_REJECTED" if completed else None
+        case "succeeded" if found is None or found.status != "COMPLETED":
+            verdict, reason = "mismatch", "REFUND_MISSING"
+        case "succeeded" if found is not None and found.amount_minor != command["amount_minor"]:
+            verdict, reason = "mismatch", "REFUND_AMOUNT_DIFFERS"
+        case "rejected" if moving:
+            verdict, reason = "mismatch", "REFUNDED_BUT_REJECTED"
+        case "pending" if command["sent_at"] is None:
+            verdict, reason = ("mismatch", "REFUNDED_BUT_UNSENT") if moving else ("not_sent", None)
+        case "pending" | "unknown":
+            verdict = "open"
         case _:
-            return _row(
-                payment, "refund", "open", command_id=command["id"], local=local, paypal=shown
-            )
+            pass
     return _row(
         payment,
         "refund",
-        "mismatch" if reason else "match",
+        verdict,
         command_id=command["id"],
         reason=reason,
         local=local,
@@ -203,7 +224,7 @@ def _totals(payment: DictRow, order: _Order | None, commands: list[DictRow]) -> 
     checks = ("captured_total", "refunded_total")
     if order is None:
         return [_row(payment, check, "unread") for check in checks]
-    captured = sum(c.amount_minor for c in order.completed_captures)
+    captured = sum(c.amount_minor for c in order.captured)
     refunded = sum(r.amount_minor for r in order.refunds if r.status == "COMPLETED")
     rows = [
         _row(

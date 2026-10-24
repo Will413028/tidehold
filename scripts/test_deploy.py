@@ -6,44 +6,59 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
 
 DEPLOY = Path(__file__).resolve().parent.parent / "deploy"
-PLACEHOLDERS = {
-    "TIDEHOLD_REVISION": "abc1234",
-    "TIDEHOLD_ORIGIN": "https://tidehold.example.ts.net",
-    "TIDEHOLD_SECRETS_DIR": "/host/tidehold-secrets",
-    "SHARED_SECRETS_DIR": "/host/shared-secrets",
+# Each host env file holds one marker, so the resolved config shows which service gets which
+# file; none holds a real value.
+ENV_FILES = {
+    "shared/paypal.env": "PAYPAL_CLIENT_ID",
+    "shared/models.env": "GROQ_API_KEY",
+    "tidehold/anthropic.env": "ANTHROPIC_API_KEY",
 }
 
 
 def resolved() -> dict[str, Any]:
-    # env files are named, not read: the secrets stay on the VM (D13)
-    result = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "-p",
-            "tidehold",
-            "-f",
-            "compose.yaml",
-            "--profile",
-            "maintenance",
-            "config",
-            "--format",
-            "json",
-            "--no-env-resolution",
-        ],
-        cwd=DEPLOY,
-        env={**os.environ, **PLACEHOLDERS},
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    project: dict[str, Any] = json.loads(result.stdout)
-    return project
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        for name, key in ENV_FILES.items():
+            (root / name).parent.mkdir(exist_ok=True)
+            (root / name).write_text(f"{key}=marker\n")
+        (root / "tidehold/db_password").write_text("marker\n")
+        result = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "-p",
+                "tidehold",
+                "-f",
+                "compose.yaml",
+                "--profile",
+                "maintenance",
+                "config",
+                "--format",
+                "json",
+            ],
+            cwd=DEPLOY,
+            env={
+                **os.environ,
+                "TIDEHOLD_REVISION": "abc1234",
+                "TIDEHOLD_ORIGIN": "https://tidehold.example.ts.net",
+                "TIDEHOLD_SECRETS_DIR": str(root / "tidehold"),
+                "SHARED_SECRETS_DIR": str(root / "shared"),
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise AssertionError(f"docker compose config failed: {result.stderr}")
+        project: dict[str, Any] = json.loads(result.stdout)
+        project["secrets_root"] = str(root)
+        return project
 
 
 class ComposeProjectTest(unittest.TestCase):
@@ -71,28 +86,21 @@ class ComposeProjectTest(unittest.TestCase):
                 self.assertLessEqual(int(service["mem_limit"]), 512 * 2**20)
                 self.assertTrue(0 < float(service["cpus"]) <= 0.5)
 
-    def test_secrets_are_referenced_by_path_and_only_where_needed(self) -> None:
-        files = {
-            name: [entry["path"] for entry in service.get("env_file", [])]
-            for name, service in self.project["services"].items()
+    def test_secrets_come_from_host_files_and_only_where_needed(self) -> None:
+        given = {
+            name: {key for key in ENV_FILES.values() if key in (s.get("environment") or {})}
+            for name, s in self.project["services"].items()
         }
 
-        self.assertEqual({name for name, paths in files.items() if paths}, {"api", "audit"})
+        self.assertEqual(given.pop("api"), set(ENV_FILES.values()))
+        self.assertEqual(given.pop("audit"), {"PAYPAL_CLIENT_ID"})  # no model keys
+        self.assertEqual({name for name, keys in given.items() if keys}, set())
         self.assertEqual(
-            files["api"],
-            [
-                "/host/shared-secrets/paypal.env",
-                "/host/shared-secrets/models.env",
-                "/host/tidehold-secrets/anthropic.env",
-            ],
+            self.project["secrets"]["db_password"]["file"],
+            f"{self.project['secrets_root']}/tidehold/db_password",
         )
-        self.assertEqual(files["audit"], ["/host/shared-secrets/paypal.env"])  # no model keys
-        self.assertEqual(
-            self.project["secrets"]["db_password"]["file"], "/host/tidehold-secrets/db_password"
-        )
-        for name, service in self.project["services"].items():
-            for key in service.get("environment") or {}:
-                self.assertIsNone(re.search(r"KEY|SECRET|PASSWORD$", key), (name, key))
+        for name in ("db", "migrate", "ingest", "api", "audit"):
+            self.assertIn("db_password", str(self.project["services"][name]["secrets"]))
 
     def test_paypal_is_the_sandbox_wherever_it_is_configured(self) -> None:
         for name in ("api", "audit"):
