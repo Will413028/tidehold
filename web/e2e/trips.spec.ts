@@ -34,7 +34,7 @@ test("an operator creates a trip bound to a published policy", async ({ page }) 
 
   await page.getByLabel("Name").fill("Anilao weekend");
   await page.getByLabel("Starts on").fill("2026-12-05");
-  await page.getByLabel("Days").fill("2");
+  await page.getByLabel("Days", { exact: true }).fill("2");
   await page.getByLabel("Time zone").fill("Asia/Manila");
   await page.getByLabel("Site latitude").fill("13.7565");
   await page.getByLabel("Site longitude").fill("120.9137");

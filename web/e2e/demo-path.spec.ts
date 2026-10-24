@@ -67,7 +67,7 @@ test("the demo path: compile, trip, guests pay, a recorded gale, the operator's 
   await page.goto("/");
   await page.getByLabel("Name").fill("Gale weekend");
   await page.getByLabel("Starts on").fill(new Date().toISOString().slice(0, 10));
-  await page.getByLabel("Days").fill("2");
+  await page.getByLabel("Days", { exact: true }).fill("2");
   await page.getByLabel("Time zone").fill("UTC");
   await page.getByLabel("Site latitude").fill("58.3");
   await page.getByLabel("Site longitude").fill("-135.5");
