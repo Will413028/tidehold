@@ -184,7 +184,7 @@ def test_the_rest_of_a_trip_is_netted_against_what_earlier_proposals_returned() 
     assert _lines(evaluation, "balance")[0]["amount_minor"] == 20000
 
 
-def test_an_unplaced_payment_returns_nothing() -> None:
+def test_a_payment_that_owes_nothing_returns_nothing() -> None:
     evaluation = evaluate([RuleIn(_rule())], DAY_2, [GuestMoney("g", 5000, 0)])
 
     assert _lines(evaluation, "balance")[0]["amount_minor"] == 0

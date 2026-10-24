@@ -92,6 +92,40 @@ Read: NWS gale and storm warnings and MeteoAlarm wind warnings are recorded trig
 
 `openmeteo.fetch` for Anilao (13.7565, 120.9137), 2026-10-19 to 10-21: daily `wave_height_max` 0.26, 0.14 and 0.80 m (`https://marine-api.open-meteo.com/v1/marine?latitude=13.75650&longitude=120.91370&daily=wave_height_max&timezone=UTC&start_date=2026-10-19&end_date=2026-10-21`).
 
+## Step 8b: refunds and credit at decision, unpaid balances, PayPal state
+
+Run 2026-10-24 on the developer's machine (local Docker, PostgreSQL 18), design `docs/plans/2026-10-19-tidehold-hackathon/step8b-design.md`.
+
+- `make check`: lint, typecheck, arch, unit (backend 124, bench 6, web 24, recorder 9, scripts 9), integration 200 passed, `quality_lock.py check` green with the raised counts (exit 0). The e2e (`make e2e`) runs only in CI; the demo path now asserts "Ana: refund USD 150.00" and "Your balance: USD 150.00 refunded".
+- The plan's acceptance tests pass by name, with the names the developer's 2026-10-24 decision changed (`test_a_payment_captured_after_its_decision_is_settled_by_that_decision`, `test_waived_amounts_count_toward_the_mandate`).
+- Mutations, each applied alone and run against its named test (`tests/integration/test_settlement.py`), all failed it: settle on the warning alone (`test_a_warning_without_a_cancellation_never_moves_money`); base net of refunds again, and no netting against earlier settlements (`test_the_rest_of_a_trip_after_an_executed_day_refund_returns_the_full_remainder`); unpaid ask a day before the due date (`test_an_unpaid_balance_asks_at_its_due_date_and_not_before`); no grace for a late invitee (`test_a_guest_invited_after_its_due_date_is_asked_about_a_day_later`); charge the full balance after a refunded day (`test_the_balance_due_after_a_refunded_day_is_reduced_by_that_refund`); include released guests (`test_a_released_guest_is_left_out_of_later_settlements`); waive without closing unsent attempts (`test_a_checkout_completing_during_a_whole_trip_cancellation_is_refused_or_settled`); dismiss an open command (`test_a_refused_resend_that_paypal_cannot_settle_becomes_an_ask`); refund a payment this decision already waived (`test_a_balance_paid_after_its_day_was_waived_is_not_refunded_for_that_day`, the closing review's HIGH).
+- Timing: the first full integration run took 939 s against 242 s at 65c1df7, measured while the machine's load average was 50 to 90 (other sessions); `--durations` showed no test above 6 s of call time, and the run after the review fixes took 352 s. Inferred: load, not the change; CI's time is the cleaner measure.
+
+`make coverage` (324 backend tests), money, holds and settlement, report only:
+
+```
+src/tidehold/holds/__init__.py             0      0      0      0   100%
+src/tidehold/holds/http.py                90      0      6      0   100%
+src/tidehold/holds/schedule.py            11      0      0      0   100%
+src/tidehold/money/__init__.py             0      0      0      0   100%
+src/tidehold/money/amounts.py              3      0      0      0   100%
+src/tidehold/money/commands.py           189     18     76     17    87%   83, 143, 187, 190, 192, 199, 224, 247, 269, 296, 300, 325, 375, 507, 553-554, 567, 573
+src/tidehold/money/paypal.py             176      5     22      3    96%   97, 108, 113, 173-174, 235->237
+src/tidehold/money/service.py            242     46     90     13    79%   67, 77-78, 88, 103, 119, 138, 146, 150-151, 168, 219-222, 225-227, 232-242, 261, 286-287, 338, 352-353, 355-356, 368, 370, 432-435, 450-459
+src/tidehold/settlement/__init__.py        0      0      0      0   100%
+src/tidehold/settlement/drafts.py         43      3      6      1    92%   73-74, 93
+src/tidehold/settlement/evaluate.py      151      0     44      2    99%   212->206, 243->242
+src/tidehold/settlement/execute.py       158     24     64      9    83%   61, 72, 110, 156-164, 178-181, 189, 259, 283-284, 333-334, 336, 359->358, 371
+src/tidehold/settlement/guest.py          90      4     28      4    93%   80, 94, 97, 109
+src/tidehold/settlement/http.py          204      1     12      2    99%   65, 177->170
+src/tidehold/settlement/matching.py       20      0      2      0   100%
+src/tidehold/settlement/moves.py          78     12     24      6    80%   59, 72, 78-80, 108-110, 138, 146-149, 150->exit
+src/tidehold/settlement/plan.py           35      2     12      3    89%   37, 42, 51->exit
+src/tidehold/settlement/proposals.py     226     13     86     15    90%   108->107, 173, 204, 212, 353, 366->369, 402, 406->416, 411, 413, 414->416, 427, 436-439, 440->exit, 482, 505->507
+src/tidehold/settlement/watch.py         103      5     30      5    92%   77, 151, 203, 216, 253
+TOTAL                                   1819    133    502     80    90%
+```
+
 ## Step 6: trips, guests and the balance payment
 
 ### Coverage after the D18 rewrite (2026-10-23, report only)

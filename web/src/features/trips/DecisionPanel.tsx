@@ -26,8 +26,7 @@ function OptionChoice({
       {options.map((option, i) => (
         <label key={option.label}>
           <input type="radio" name={purpose} checked={chosen === i} onChange={() => onChoose(i)} />{" "}
-          {option.label}:{" "}
-          {option.lines.map((line) => lineText(line, names, purpose)).join("; ") || "no guests"}
+          {option.label}: {option.lines.map((line) => lineText(line, names)).join("; ") || "no guests"}
         </label>
       ))}
     </fieldset>

@@ -30,6 +30,7 @@ const VIEW: SettlementView = {
           amount_minor: 2500,
           credit_expiry_months: null,
           clauses: ["If a Gale Warning is in force and we cancel a dive day, you get a full refund."],
+          status: "refunded",
         },
       ],
       explanation: "The operator cancelled day 1 for weather. Gale Warning (NWS) was in force.",
@@ -54,15 +55,30 @@ it("shows nothing when the operator has cancelled nothing", () => {
   expect(renderToStaticMarkup(<GuestSettlements view={{ settlements: [], credits: [] }} />)).toBe("");
 });
 
-it("words each outcome from its kind and payment", () => {
+it("words an outcome by what it has done so far", () => {
   const base = { amount_minor: 15000, credit_expiry_months: null, clauses: [] };
+  expect([
+    outcomeText({ ...base, purpose: "balance", kind: "refund", status: "not_charged" }),
+    outcomeText({ ...base, purpose: "deposit", kind: "refund", status: "refund_processing" }),
+    outcomeText({ ...base, purpose: "balance", kind: "credit", status: "waiting_for_payment" }),
+    outcomeText({ ...base, purpose: "balance", kind: "refund", status: "refunded" }),
+  ]).toEqual([
+    "Your balance: USD 150.00 taken off what you owe",
+    "Your deposit: USD 150.00 refund in progress",
+    "Your balance: USD 150.00 as credit once you pay",
+    "Your balance: USD 150.00 refunded",
+  ]);
+});
+
+it("words each outcome from its kind and payment", () => {
+  const base = { amount_minor: 15000, credit_expiry_months: null, clauses: [], status: "none" as const };
   expect([
     outcomeText({ ...base, purpose: "balance", kind: "refund" }),
     outcomeText({ ...base, purpose: "deposit", kind: "credit", credit_expiry_months: 12 }),
     outcomeText({ ...base, purpose: "deposit", kind: "none" }),
     outcomeText({ ...base, purpose: "deposit", kind: "refund", amount_minor: 0 }),
   ]).toEqual([
-    "Your balance: USD 150.00 released",
+    "Your balance: USD 150.00 refunded",
     "Your deposit: USD 150.00 as credit",
     "Your deposit: no change",
     "Your deposit: no change",

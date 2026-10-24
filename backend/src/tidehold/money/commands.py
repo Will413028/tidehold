@@ -141,6 +141,9 @@ async def open_attempt(conn: Conn, payment_id: UUID, method: Method, *, daily_ca
     current = await payment(conn, payment_id, lock=True)
     if current["state"] != "pending":
         raise Conflict("PAYMENT_ALREADY_PLACED")
+    due = current["amount_minor"] - current["waived_minor"]
+    if due == 0:
+        raise Conflict("NOTHING_DUE")
     await _within_daily_cap(conn, current["workspace_id"], daily_cap)
     replaced = await (
         await conn.execute(
@@ -165,9 +168,70 @@ async def open_attempt(conn: Conn, payment_id: UUID, method: Method, *, daily_ca
         )
     ).fetchone():
         raise Conflict("PAYMENT_ATTEMPT_IN_FLIGHT")
-    return await _insert(
-        conn, NewCommand(payment_id, "open", current["amount_minor"], method=method)
+    return await _insert(conn, NewCommand(payment_id, "open", due, method=method))
+
+
+# What a waiver found: it lowered what is due (`waived`, or `already` for a rerun of the same
+# proposal), or it cannot, because the payment was captured or an attempt to pay it is at PayPal.
+Waived = Literal["waived", "already", "captured", "in_flight"]
+
+
+async def waive(conn: Conn, payment_id: UUID, *, amount_minor: int, proposal_id: UUID) -> Waived:
+    """Lower what a payment not yet captured owes, for the proposal that decided it (plan step
+    8b), under the payment's row lock. Unsent attempts are closed first: their orders were
+    created for the old amount, and the update locks each attempt's row, so a concurrent `claim`
+    either sent it already (the attempt is in flight and nothing is waived) or finds it closed.
+    Refused above what is still due (`WAIVER_EXCEEDS_DUE`) and on a placed hold (`PAYMENT_HELD`,
+    development data until step 8c)."""
+    if amount_minor <= 0:
+        raise ValueError("a waiver lowers a positive amount")
+    current = await payment(conn, payment_id, lock=True)
+    if current["state"] == "captured":
+        return "captured"
+    if current["state"] != "pending":
+        raise Conflict("PAYMENT_HELD")
+    if await (
+        await conn.execute(
+            "select 1 from payment_waivers where proposal_id = %s and payment_id = %s",
+            (proposal_id, payment_id),
+        )
+    ).fetchone():
+        return "already"
+    closed = await (
+        await conn.execute(
+            "update money_commands set status = 'rejected', error_code = 'AMOUNT_DUE_CHANGED',"
+            " completed_at = now() where payment_id = %s and kind = 'open'"
+            " and status = 'pending' and sent_at is null returning id",
+            (payment_id,),
+        )
+    ).fetchall()
+    for row in closed:
+        await append(
+            conn,
+            payment_id,
+            "open_rejected",
+            {"command": str(row["id"]), "error": "AMOUNT_DUE_CHANGED"},
+        )
+    if await (
+        await conn.execute(
+            "select 1 from money_commands where payment_id = %s and kind = 'open'"
+            " and status in ('pending', 'unknown')",
+            (payment_id,),
+        )
+    ).fetchone():
+        return "in_flight"
+    if amount_minor > current["amount_minor"] - current["waived_minor"]:
+        raise Conflict("WAIVER_EXCEEDS_DUE")
+    await conn.execute(
+        "insert into payment_waivers (payment_id, proposal_id, amount_minor) values (%s, %s, %s)",
+        (payment_id, proposal_id, amount_minor),
     )
+    await conn.execute(
+        "update payments set waived_minor = waived_minor + %s where id = %s",
+        (amount_minor, payment_id),
+    )
+    await append(conn, payment_id, "waived", {"proposal": str(proposal_id), "amount": amount_minor})
+    return "waived"
 
 
 async def set_order(conn: Conn, command_id: UUID, order_id: str) -> None:
@@ -488,3 +552,25 @@ async def _apply(conn: Conn, command: DictRow, result: dict[str, Any]) -> None:
             )
         case kind:
             raise ValueError(f"unknown command kind {kind}")
+
+
+async def resolve_by_operator(conn: Conn, command_id: UUID, *, found: bool) -> DictRow:
+    """Settle a command no read of PayPal could decide, from what the operator found in PayPal
+    (plan step 8b, the `command_open` ask), so it does not stay open for ever. Only a refund can
+    be found this way: a payment placed without the capture id PayPal returns could never be
+    refunded, so an open the operator found must be read from PayPal (`OPEN_NEEDS_PAYPAL_READ`).
+    The answer is kept in the command's result and its payment event."""
+    row = await (
+        await conn.execute("select * from money_commands where id = %s for update", (command_id,))
+    ).fetchone()
+    if row is None or row["status"] not in ("pending", "unknown"):
+        raise Conflict("MONEY_COMMAND_NOT_OPEN")
+    if not found:
+        return await complete(
+            conn, command_id, "rejected", error_code="OPERATOR_FOUND_NOTHING_AT_PAYPAL"
+        )
+    if row["kind"] != "refund":
+        raise Conflict("OPEN_NEEDS_PAYPAL_READ")
+    return await complete(
+        conn, command_id, "succeeded", result={**(row["result"] or {}), "resolvedBy": "operator"}
+    )

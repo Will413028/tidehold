@@ -130,13 +130,15 @@ async def trips(conn: Conn, workspace_id: UUID) -> list[DictRow]:
 
 
 GUEST_PAYMENTS = (
-    "select g.id, g.name, g.token, g.trip_id, g.workspace_id, g.created_at,"
+    "select g.id, g.name, g.token, g.trip_id, g.workspace_id, g.created_at, g.released_at,"
     " d.id as deposit_id, d.state as deposit_state, d.amount_minor as deposit_minor,"
     " d.captured_minor as deposit_captured_minor, d.refunded_minor as deposit_refunded_minor,"
+    " d.waived_minor as deposit_waived_minor,"
     " b.id as balance_id, b.state as balance_state, b.amount_minor as balance_minor,"
-    " b.captured_minor as balance_captured_minor"
+    " b.captured_minor as balance_captured_minor, b.refunded_minor as balance_refunded_minor,"
+    " b.waived_minor as balance_waived_minor"
     " from guests g join payments d on d.id = g.deposit_payment_id"
-    " left join payments b on b.id = g.balance_payment_id"
+    " join payments b on b.id = g.balance_payment_id"
 )
 
 
@@ -159,6 +161,13 @@ async def cancel_whole_trip(conn: Conn, trip_id: UUID, now: datetime) -> None:
 async def reopen(conn: Conn, trip_id: UUID) -> None:
     """Undo `cancel_whole_trip` when the operator withdraws the cancellation."""
     await conn.execute("update trips set cancelled_at = null where id = %s", (trip_id,))
+
+
+async def guest(conn: Conn, guest_id: UUID) -> DictRow:
+    row = await (await conn.execute(GUEST_PAYMENTS + " where g.id = %s", (guest_id,))).fetchone()
+    if row is None:
+        raise NotFound
+    return row
 
 
 async def guest_by_token(conn: Conn, token: str) -> DictRow:

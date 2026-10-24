@@ -104,8 +104,8 @@ test("the demo path: compile, trip, guests pay, a recorded gale, the operator's 
     .getByRole("button")
     .click();
   const decision = page.getByRole("region", { name: "Decision" });
-  // until step 8b, step 8a settles only a held balance, so a paid one gets nothing yet
-  await expect(decision.getByRole("group", { name: "Balance" })).toContainText("Ana: nothing");
+  // both payments are paid, so the cancelled day is refunded on each (step 8b)
+  await expect(decision.getByRole("group", { name: "Balance" })).toContainText("Ana: refund USD 150.00");
   await decision.getByRole("button", { name: "Accept these options" }).click();
   await expect(waiting).not.toContainText("Cancelled day 1");
   await fitsTheScreen(page);
@@ -118,7 +118,7 @@ test("the demo path: compile, trip, guests pay, a recorded gale, the operator's 
   );
   await expect(cancellations.getByRole("list", { name: "Your outcome" }).getByRole("listitem")).toHaveText([
     "Your deposit: USD 25.00 refunded",
-    "Your balance: no change",
+    "Your balance: USD 150.00 refunded",
   ]);
   await expect(cancellations).toContainText(/recorded at .* UTC, replayed/);
   await expect(cancellations).not.toContainText("Ben");

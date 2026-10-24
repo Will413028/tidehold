@@ -44,7 +44,13 @@ async def test_a_guest_gets_its_balance_payment_at_invitation(
     assert balance == {
         "due_on": (starts_on - timedelta(days=30)).isoformat(),
         "amount_minor": 30000,
-        "payment": {"state": "pending", "amount_minor": 30000, "captured_minor": 0},
+        "payment": {
+            "state": "pending",
+            "amount_minor": 30000,
+            "due_minor": 30000,
+            "captured_minor": 0,
+            "refunded_minor": 0,
+        },
     }
     assert row is not None
     assert row["intent"] == "capture"
@@ -60,7 +66,13 @@ async def test_the_balance_is_captured_when_the_guest_pays(
     order = (await client.post(f"/api/guest/{by_checkout}/balance/checkout")).json()["order_id"]
     done = await client.post(f"/api/guest/{by_checkout}/balance/checkout/{order}")
 
-    paid = {"state": "captured", "amount_minor": 30000, "captured_minor": 30000}
+    paid = {
+        "state": "captured",
+        "amount_minor": 30000,
+        "due_minor": 0,
+        "captured_minor": 30000,
+        "refunded_minor": 0,
+    }
     assert card["payment"] == paid
     assert done.json()["balance"]["payment"] == paid
     assert {o["intent"] for o in paypal.orders.values()} == {"CAPTURE"}
@@ -104,7 +116,13 @@ async def test_the_deposit_capture_is_recorded_with_its_money_command(
             (guest["deposit_id"],),
         )
     ).fetchall()
-    assert paid == {"state": "captured", "amount_minor": 5000, "captured_minor": 5000}
+    assert paid == {
+        "state": "captured",
+        "amount_minor": 5000,
+        "due_minor": 0,
+        "captured_minor": 5000,
+        "refunded_minor": 0,
+    }
     assert [dict(c) for c in commands] == [
         {"kind": "open", "method": "test_card", "status": "succeeded", "amount_minor": 5000}
     ]
@@ -245,18 +263,3 @@ async def test_the_trip_timeline_lists_each_guests_money_events(
         ("Ana", "balance", "payment_created"),
         ("Ana", "deposit", "open_succeeded"),
     ]
-
-
-async def test_a_guest_invited_before_the_balance_was_payable_from_invitation_has_none(
-    operator: AsyncClient, client: AsyncClient, conn: Conn
-) -> None:
-    """Migration 0015 created no balance payment for such a guest (developer, 2026-10-23)."""
-    token = await _invite(operator, TRIP)
-    await conn.execute("update guests set balance_payment_id = null where token = %s", (token,))
-
-    balance = (await client.get(f"/api/guest/{token}")).json()["balance"]
-    paid = await client.post(f"/api/guest/{token}/balance/test-card")
-
-    assert (balance["payment"], balance["amount_minor"]) == (None, 30000)
-    assert "due_on" in balance
-    assert (paid.status_code, paid.json()) == (409, {"detail": "NO_BALANCE_PAYMENT"})

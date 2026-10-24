@@ -19,3 +19,14 @@ def balance_due_at(trip: Mapping[str, Any], invited_at: datetime) -> datetime:
     due_on = trip["starts_on"] - timedelta(days=trip["balance_due_days"])
     local = datetime.combine(due_on, time(), ZoneInfo(trip["timezone"]))
     return max(local, invited_at).astimezone(UTC)
+
+
+# A guest invited after its due date gets a day to pay before the operator hears of it
+# (developer, 2026-10-24; step 8b design, review finding 8).
+UNPAID_GRACE = timedelta(hours=24)
+
+
+def unpaid_ask_at(trip: Mapping[str, Any], invited_at: datetime) -> datetime:
+    """When an unpaid balance becomes the operator's question: its due date, and for a guest
+    invited near or after it, not before a day has passed since the invitation. In UTC."""
+    return max(balance_due_at(trip, invited_at), (invited_at + UNPAID_GRACE).astimezone(UTC))

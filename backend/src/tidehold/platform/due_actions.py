@@ -94,6 +94,18 @@ async def schedule(conn: Conn, kind: Kind, subject: UUID, *, due_at: datetime | 
     )
 
 
+async def wake(conn: Conn, kind: Kind, subject: UUID, *, due_at: datetime) -> None:
+    """Like `schedule`, but an open action still pending is brought forward to `due_at`: an
+    operator's answer that unblocks it should not wait out a retry's backoff. A running one is
+    left alone (its handler re-reads state, D17)."""
+    await schedule(conn, kind, subject, due_at=due_at)
+    await conn.execute(
+        "update due_actions set due_at = least(due_at, %s) where kind = %s"
+        " and coalesce(trip_id, payment_id, proposal_id) = %s and state = 'pending'",
+        (due_at, kind, subject),
+    )
+
+
 async def claim(
     conn: Conn, now: datetime, leases: Mapping[Kind, timedelta] = LEASES
 ) -> Action | None:

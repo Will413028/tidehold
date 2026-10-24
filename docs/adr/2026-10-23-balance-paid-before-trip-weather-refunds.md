@@ -71,6 +71,17 @@ The superseded ADR held each guest's balance as a PayPal AUTHORIZE at T-(29 − 
   - An unpaid balance asks the operator to wait or to release the guest. Releasing moves no money, because guest-cancellation clauses are not compiled. Operators researched "reserve the right" to treat an unpaid balance as the guest's cancellation (Komodo Cruises, Dragon Dive).
   - The ask offers no due-date extension: choosing to wait keeps the payment link open.
 
+## Amendment (2026-10-24): late payments settled by their own decision
+
+Designing step 8b showed that the first amendment's late-payment items, taken with the plan's "gross captured base", could not work together: a balance not yet paid had base 0, so "the balance is charged net of refunds already decided for it" took nothing off, and the guest paid in full and was refunded. Decided by the developer on 2026-10-24 (`docs/plans/2026-10-19-tidehold-hackathon/step8b-design.md`), replacing three of the first amendment's late-payment items:
+
+- **Base:** every settlement line is computed on what the guest owes on the payment (its amount), paid yet or not, and later settlements net only through what earlier ones returned. What a line does is decided when it executes: a refund of a captured payment goes to PayPal; a refund of a payment not yet paid lowers what is due on it (a waiver, which closes the payment's unsent checkouts); a credit is written once its payment is captured.
+- **No own proposal for a late payment:** a payment captured after its settlement was decided executes that settlement's line (refund or credit), which already passed the mandate check at decision. Replaces "a payment still uncovered gets its own settlement proposal". Guests invited after a cancellation are not part of it.
+- **No trip lock in completing a checkout:** a waiver closes unsent attempts under the payment's row lock and waits for an attempt already at PayPal, so no capture escapes a decided settlement. Replaces "completing a checkout takes the trip lock that recording a cancellation takes".
+- **Unpaid-balance ask timing:** a guest invited near or after its due date is asked about no sooner than 24 hours after its invitation.
+
+Cost: a guest who pays while a settlement is still asked pays in full and is refunded at acceptance, losing PayPal's fee, the price of letting the operator decide.
+
 ## Revocation Triggers
 
 - Vault becomes available in the target markets → the baseline (charge the saved method on the due date).

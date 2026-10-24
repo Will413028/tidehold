@@ -1,14 +1,17 @@
-"""The `settle_proposal` due action: move the money an accepted whole-trip settlement decides
-now (plan step 8a). Deposit refunds are sent, and a balance that owes nothing is voided; a
-balance that still owes a capture, and the money of day cancellations, wait for finalize
-(step 8b). Each command records the proposal that authorized it.
+"""The `settle_proposal` due action: move the money an accepted settlement decided, day or
+whole trip (plan step 8b, D18, D21). What each line does comes from `settlement.moves`: a
+refund of a captured payment is sent to PayPal, a refund of a payment not yet paid lowers
+what is due, and a credit is written once its payment is captured. Each command records the
+proposal that authorized it.
 
 The handler re-reads the proposal before acting (a cancellation or decision since it was
-scheduled supersedes it by state, D17), and a rerun finds the commands an earlier run stored,
-so it resumes instead of sending twice.
+scheduled supersedes it by state, D17), and a rerun finds the commands, waivers and credits an
+earlier run stored, so it resumes instead of moving money twice. A settlement stays `accepted`
+while a line waits for its payment (an attempt at PayPal, or a credit not yet paid for); the
+schedules sweep runs it again once that payment can move.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -21,8 +24,7 @@ from tidehold.money.paypal import PayPalClient
 from tidehold.platform import due_actions as due
 from tidehold.platform.db import Conn
 from tidehold.platform.errors import Conflict
-from tidehold.settlement import proposals
-from tidehold.settlement.plan import Payment, settle_payment
+from tidehold.settlement import moves, proposals
 from tidehold.trips import store as trips
 
 
@@ -148,105 +150,70 @@ def _status(command: DictRow) -> str:
     return str(command["status"])
 
 
-def _released(proposal_rows: list[DictRow], guest_id: str) -> int:
-    total = 0
-    for row in proposal_rows:
-        index = row["choice"]["balance"]
-        for line in row["parts"]["balance"][index]["lines"]:
-            if line["guest_id"] == guest_id and line["kind"] == "refund":
-                total += line["amount_minor"]
-    return total
+async def _waive(conn: Conn, proposal: DictRow, line: moves.Line) -> str:
+    """A refund of a payment not yet paid: `final` once waived, `refund` when it was captured
+    meanwhile, `wait` while an attempt to pay it is at PayPal, `refused` above what is due."""
+    try:
+        async with conn.transaction():
+            waived = await moves.waive(conn, proposal, line)
+    except Conflict as error:
+        if error.code != "WAIVER_EXCEEDS_DUE":
+            raise
+        await _waiver_refused(conn, proposal, line)
+        return "refused"
+    return {"waived": "final", "already": "final", "captured": "refund", "in_flight": "wait"}[
+        waived
+    ]
 
 
-def _line(proposal: DictRow, purpose: str, guest_id: str) -> dict[str, Any] | None:
-    """The guest's line in the chosen option; None for a guest invited after evaluation."""
-    lines = proposal["parts"][purpose][proposal["choice"][purpose]]["lines"]
-    return next((line for line in lines if line["guest_id"] == guest_id), None)
-
-
-def _placed_late(line: dict[str, Any] | None) -> bool:
-    """Paid or held after the settlement was evaluated, so no outcome covers it."""
-    return line is None or line["base_minor"] == 0
-
-
-def _moves(
-    proposal: DictRow, guest: DictRow, accepted: list[DictRow]
-) -> list[tuple[UUID, dict[str, Any]]]:
-    """The commands this settlement sends now for one guest."""
-    moves: list[tuple[UUID, dict[str, Any]]] = []
-    guest_id = str(guest["id"])
-    deposit = _line(proposal, "deposit", guest_id)
-    if deposit is not None and deposit["kind"] == "refund" and deposit["amount_minor"] > 0:
-        moves.append(
-            (guest["deposit_id"], {"kind": "refund", "amount_minor": deposit["amount_minor"]})
-        )
-    if guest["balance_state"] == "authorized":
-        if _placed_late(_line(proposal, "balance", guest_id)):
-            # a hold placed while the trip was being cancelled as a whole: the trip will not
-            # happen and no outcome claims it, so it is released
-            owed = 0
-        else:
-            owed = guest["balance_minor"] - _released(accepted, guest_id)
-        settlement = settle_payment(Payment("authorized", guest["balance_minor"]), max(owed, 0))
-        if settlement.action == "void":
-            moves.append((guest["balance_id"], {"kind": "void", "amount_minor": 0}))
-    return moves
-
-
-async def _late_deposit(conn: Conn, proposal: DictRow, guest: DictRow) -> None:
-    """A deposit captured after evaluation: no outcome covers it, so the operator is asked."""
-    if guest["deposit_state"] != "captured":
-        return
-    if not _placed_late(_line(proposal, "deposit", str(guest["id"]))):
-        return
-    trip = await trips.trip(conn, proposal["workspace_id"], proposal["trip_id"])
-    await proposals.ask(
-        conn,
-        trip,
-        proposals.NewAsk(
-            "late_payment",
-            f"payment:{guest['deposit_id']}",
-            f"{guest['name']} paid the deposit ({usd(guest['deposit_minor'])}) while the"
-            " trip was being cancelled, so no settlement covers it. Settle it with the guest"
-            " outside tidehold, then dismiss this ask.",
-            {"guest": guest["name"], "amount_minor": guest["deposit_minor"]},
-        ),
-    )
+async def _settle_line(
+    conn: Conn, client: PayPalClient | None, proposal: DictRow, line: moves.Line, now: datetime
+) -> tuple[str, bool]:
+    """Make one line's move; its status for `_final`, and whether its refund is no longer read
+    (`_being_read`)."""
+    move = moves.move(line)
+    if line.kind == "refund" and await moves.waived(conn, proposal, line):
+        return "final", False  # taken off before it was paid; a capture since owes no refund
+    if move == "waive":
+        outcome = await _waive(conn, proposal, line)
+        if outcome != "refund":
+            return outcome, False
+        move = "refund"  # captured meanwhile
+    if move == "credit":
+        async with conn.transaction():
+            await moves.credit(conn, proposal, line)
+        return "final", False
+    if move != "refund":
+        return move, False  # `none`, or `wait` for its payment
+    if client is None:
+        raise due.RetryLater("PAYPAL_NOT_CONFIGURED")
+    step = (line.payment_id, {"kind": "refund", "amount_minor": line.amount_minor})
+    status = await _send(conn, client, proposal, step, now)
+    if status in ("rejected", "refused"):
+        await _refused(conn, proposal, line.guest, step)
+    unread = False
+    if status in ("unknown", "processing"):
+        command = await _command(conn, line.payment_id, "refund", proposal["id"])
+        unread = command is None or not await _being_read(conn, line.payment_id, command)
+    return status, unread
 
 
 async def settle(conn: Conn, client: PayPalClient | None, proposal_id: UUID, now: datetime) -> None:
     proposal = await (
         await conn.execute("select * from proposals where id = %s", (proposal_id,))
     ).fetchone()
-    if proposal is None or proposal["state"] not in ("accepted", "executed"):
-        return  # decided otherwise
-    # an executed settlement runs again only for payments placed late (`ensure_schedules`);
-    # the commands it already sent are found and not sent again
-    if client is None:
-        raise due.RetryLater("PAYPAL_NOT_CONFIGURED")
-    accepted = await (
-        await conn.execute(
-            "select parts, choice from proposals where trip_id = %s and kind = 'settlement'"
-            " and state in ('accepted', 'executed')",
-            (proposal["trip_id"],),
-        )
-    ).fetchall()
+    if proposal is None or proposal["state"] != "accepted":
+        return  # decided otherwise, or done
     statuses: list[str] = []
     unread = False
-    for guest in await trips.guests(conn, proposal["trip_id"]):
-        await _late_deposit(conn, proposal, guest)
-        for payment_id, move in _moves(proposal, guest, accepted):
-            status = await _send(conn, client, proposal, (payment_id, move), now)
-            statuses.append(status)
-            if status in ("rejected", "refused"):
-                await _refused(conn, proposal, guest, (payment_id, move))
-            if status in ("unknown", "processing"):
-                command = await _command(conn, payment_id, move["kind"], proposal["id"])
-                unread = (
-                    command is None or not await _being_read(conn, payment_id, command) or unread
-                )
-    if not _final(statuses, unread=unread):
-        return  # a refusal before PayPal keeps the settlement accepted, for the operator (8b)
+    for line in moves.lines(proposal, await trips.guests(conn, proposal["trip_id"])):
+        status, gone = await _settle_line(conn, client, proposal, line, now)
+        statuses.append(status)
+        unread = unread or gone
+    if not _final(statuses, unread=unread) or "wait" in statuses:
+        # a refusal keeps the settlement accepted, for the operator; a line waiting for its
+        # payment runs again from the sweep once that payment can move
+        return
     await conn.execute(
         "update proposals set state = 'executed' where id = %s and state = 'accepted'",
         (proposal_id,),
@@ -267,6 +234,19 @@ def _final(statuses: list[str], *, unread: bool) -> bool:
     return "refused" not in statuses
 
 
+def _refused_text(by: str, kind: str, name: str, amount: int, code: str | None) -> str:
+    if code == "REFUND_WINDOW_CLOSED":
+        return (
+            f"{by} the {kind} for {name} ({usd(amount)}): the payment was captured more than"
+            " 180 days ago, past PayPal's refund window. Refund the guest another way, or offer"
+            " a credit, then dismiss this ask."
+        )
+    return (
+        f"{by} the {kind} for {name} ({usd(amount)}, {code}). Settle it with the guest"
+        " outside tidehold, then dismiss this ask."
+    )
+
+
 async def _refused(
     conn: Conn, proposal: DictRow, guest: DictRow, step: tuple[UUID, dict[str, Any]]
 ) -> None:
@@ -284,9 +264,9 @@ async def _refused(
         proposals.NewAsk(
             "money_refused",
             f"command:{command['id']}",
-            f"{by} the {move['kind']} for {guest['name']}"
-            f" ({usd(move['amount_minor'])}, {command['error_code']}). Settle it with the guest"
-            " outside tidehold, then dismiss this ask.",
+            _refused_text(
+                by, move["kind"], guest["name"], move["amount_minor"], command["error_code"]
+            ),
             {
                 "guest": guest["name"],
                 "kind": move["kind"],
@@ -297,71 +277,90 @@ async def _refused(
     )
 
 
-# Authorizations are valid 29 days: a payment placed late after that has expired or settled.
-LATE_SWEEP = timedelta(days=30)
+async def _waiver_refused(conn: Conn, proposal: DictRow, line: moves.Line) -> None:
+    """A waiver above what is still due: netting through earlier settlements makes it
+    unreachable, so it stops for the operator instead of lowering the amount silently."""
+    trip = await trips.trip(conn, proposal["workspace_id"], proposal["trip_id"])
+    await proposals.ask(
+        conn,
+        trip,
+        proposals.NewAsk(
+            "money_refused",
+            f"waiver:{proposal['id']}:{line.payment_id}",
+            _refused_text(
+                "tidehold refused",
+                f"reduction of the {line.purpose}",
+                line.guest["name"],
+                line.amount_minor,
+                "WAIVER_EXCEEDS_DUE",
+            ),
+            {
+                "guest": line.guest["name"],
+                "kind": "waiver",
+                "amount_minor": line.amount_minor,
+                "code": "WAIVER_EXCEEDS_DUE",
+            },
+        ),
+    )
 
 
-def _late_payments(
-    proposal: DictRow, guests: list[DictRow], asked: set[str], voiding: set[UUID]
-) -> bool:
-    """Whether a payment the settlement did not cover is still unhandled: a late hold with no
-    void sent for it, or a late deposit not yet asked about."""
-    for guest in guests:
-        guest_id = str(guest["id"])
-        if (
-            guest["balance_state"] == "authorized"
-            and _placed_late(_line(proposal, "balance", guest_id))
-            and guest["balance_id"] not in voiding
-        ):
-            return True
-        if (
-            guest["deposit_state"] == "captured"
-            and _placed_late(_line(proposal, "deposit", guest_id))
-            and f"payment:{guest['deposit_id']}" not in asked
-        ):
-            return True
-    return False
+# For each move that can act on its own, what shows it already acted (or is at PayPal).
+_DONE: dict[moves.Move, str] = {
+    "credit": "select 1 from credits where proposal_id = %(proposal)s and guest_id = %(guest)s"
+    " and purpose = %(purpose)s",
+    # a refund line is done once refunded or waived (a waived payment captured since owes none)
+    "refund": "select 1 from money_commands where proposal_id = %(proposal)s"
+    " and payment_id = %(payment)s and kind = 'refund'"
+    " union all select 1 from payment_waivers where proposal_id = %(proposal)s"
+    " and payment_id = %(payment)s",
+    # a waiver is done once stored, refused (its ask is open), or waiting on an attempt at PayPal
+    "waive": "select 1 from payment_waivers where proposal_id = %(proposal)s"
+    " and payment_id = %(payment)s"
+    " union all select 1 from proposals where kind = 'money_refused'"
+    " and subject = 'waiver:' || %(proposal)s || ':' || %(payment)s"
+    " union all select 1 from money_commands where payment_id = %(payment)s and kind = 'open'"
+    " and status in ('pending', 'unknown') and sent_at is not null",
+}
+
+
+async def _can_move(conn: Conn, proposal: DictRow, line: moves.Line) -> bool:
+    """Whether a line of an accepted settlement can move now and has not: its payment was
+    captured and its refund or credit is not stored, or it is unpaid, not at PayPal, and not
+    waived. A line still waiting, or a refund already handed to PayPal, does not count: the
+    refund's own retries and reads finish it."""
+    try:
+        move = moves.move(line)
+    except Conflict:
+        return False  # a placed hold: its settlement fails when it runs, for the console
+    if move not in _DONE:
+        return False
+    params = {
+        "proposal": proposal["id"],
+        "guest": line.guest["id"],
+        "purpose": line.purpose,
+        "payment": line.payment_id,
+    }
+    return await (await conn.execute(_DONE[move], params)).fetchone() is None
 
 
 async def ensure_schedules(conn: Conn, now: datetime) -> int:
-    """Run a whole-trip settlement again when a payment it did not cover lands after it ran (an
-    attempt in flight during the cancellation, or one reconciled later)."""
+    """Run an accepted settlement again when one of its lines can move now: the payment it
+    waited for was captured (refund or credit it), or its attempt at PayPal ended unpaid
+    (waive it). A settlement whose lines all wait costs only this read."""
     rows = await (
         await conn.execute(
-            "select p.* from proposals p join trips t on t.id = p.trip_id"
-            " join cancellations c on c.id = p.cancellation_id"
-            " where t.cancelled_at > %s and c.scope = 'rest' and c.withdrawn_at is null"
-            " and p.state in ('accepted', 'executed')"
+            "select p.* from proposals p where p.kind = 'settlement' and p.state = 'accepted'"
             " and not exists (select 1 from due_actions d where d.proposal_id = p.id"
-            "   and d.kind = 'settle_proposal' and d.state in ('pending', 'running'))",
-            (now - LATE_SWEEP,),
+            "   and d.kind = 'settle_proposal' and d.state in ('pending', 'running'))"
         )
     ).fetchall()
     scheduled = 0
     for proposal in rows:
-        asked = {
-            row["subject"]
-            for row in await (
-                await conn.execute(
-                    "select subject from proposals where trip_id = %s and kind = 'late_payment'",
-                    (proposal["trip_id"],),
-                )
-            ).fetchall()
-        }
-        voiding = {
-            row["payment_id"]
-            for row in await (
-                await conn.execute(
-                    "select payment_id from money_commands"
-                    " where proposal_id = %s and kind = 'void'",
-                    (proposal["id"],),
-                )
-            ).fetchall()
-        }
-        guests = await trips.guests(conn, proposal["trip_id"])
-        if _late_payments(proposal, guests, asked, voiding):
-            await due.schedule(conn, "settle_proposal", proposal["id"], due_at=now)
-            scheduled += 1
+        for line in moves.lines(proposal, await trips.guests(conn, proposal["trip_id"])):
+            if await _can_move(conn, proposal, line):
+                await due.schedule(conn, "settle_proposal", proposal["id"], due_at=now)
+                scheduled += 1
+                break
     return scheduled
 
 

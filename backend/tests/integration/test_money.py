@@ -553,7 +553,9 @@ async def test_a_pending_refund_beside_a_refused_resend_is_read_until_it_ends(
     assert waiting == ["pending"] * 12
     assert (await _command(conn, pending["id"]))["status"] == "succeeded"
     assert (await _command(conn, lost["id"]))["status"] == "unknown"
-    assert ended[-1] == "failed"  # held alone, it still ends for the operator console
+    # held alone, reconciliation stops: the settlement's `command_open` ask takes it to the
+    # operator (step 8b), so it is not retried until it fails
+    assert ended[-1] == "done"
     assert fake.posts("/refund") == 3  # the pending one, the lost one and its refused resend
 
 

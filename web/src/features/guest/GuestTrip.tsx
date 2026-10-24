@@ -14,10 +14,16 @@ const STATE: Record<PaymentView["state"], string> = {
 
 function balanceLine(view: GuestView): string {
   const { balance } = view;
-  if (balance.payment === null || balance.payment.state === "pending") {
-    return `${formatUsd(balance.amount_minor)}, due ${balance.due_on}`;
+  const payment = balance.payment;
+  if (view.released)
+    return `${formatUsd(balance.amount_minor)}: released by the operator, nothing more to pay`;
+  if (payment.state === "pending") {
+    // what is still due: the operator's settlements may have taken cancelled days off it
+    if (payment.due_minor === 0) return `${formatUsd(balance.amount_minor)}: nothing to pay`;
+    return `${formatUsd(payment.due_minor)}, due ${balance.due_on}`;
   }
-  return `${formatUsd(balance.amount_minor)}: ${STATE[balance.payment.state]}`;
+  if (payment.state === "captured") return `${formatUsd(payment.captured_minor)}: paid`;
+  return `${formatUsd(balance.amount_minor)}: ${STATE[payment.state]}`;
 }
 
 export function GuestTrip({

@@ -57,7 +57,8 @@ class Cancelled:
 @dataclass(frozen=True)
 class GuestMoney:
     guest_id: str
-    # the deposit's net captured amount, and the authorized balance; 0 when not placed
+    # what the guest owes on each payment, paid yet or not (step 8b): a line's amount is a
+    # share of it, and a line on a payment not yet paid is taken off what is due
     deposit_base: int
     balance_base: int
     # what the trip's accepted proposals already returned on each payment
@@ -171,7 +172,7 @@ def _part(
                     "kind": option.remedy.kind,
                     "amount_minor": _amount(option, cancelled, guest, purpose),
                     "credit_expiry_months": option.remedy.credit_expiry_months,
-                    # what was paid or held when evaluated: 0 means not placed then
+                    # what the line's amount was computed from (the decision record)
                     "base_minor": guest.base(purpose),
                 }
                 for guest in guests

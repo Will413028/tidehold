@@ -45,19 +45,24 @@ class Choice(BaseModel):
 
 
 class Decision(BaseModel):
-    """Exactly one of `accept` (a settlement's option per purpose), `reject` (a settlement)
-    or `dismiss` (any other ask)."""
+    """Exactly one of `accept` (a settlement's option per purpose), `reject` (a settlement),
+    `dismiss` (a warning, a refused move, or waiting on an unpaid balance), `release` (the guest
+    of an unpaid balance) or `resolve` (an open command, from what PayPal shows); which a kind
+    takes is `store.ANSWERS`."""
 
     model_config = ConfigDict(extra="forbid")
 
     accept: Choice | None = None
     reject: Literal[True] | None = None
     dismiss: Literal[True] | None = None
+    release: Literal[True] | None = None
+    resolve: Literal["found", "not_found"] | None = None
 
     @model_validator(mode="after")
     def _one(self) -> "Decision":
-        if sum(v is not None for v in (self.accept, self.reject, self.dismiss)) != 1:
-            raise ValueError("exactly one of accept, reject, dismiss")
+        answers = (self.accept, self.reject, self.dismiss, self.release, self.resolve)
+        if sum(v is not None for v in answers) != 1:
+            raise ValueError("exactly one of accept, reject, dismiss, release, resolve")
         return self
 
 
@@ -113,6 +118,8 @@ async def decide(
         accept=body.accept.model_dump() if body.accept else None,
         reject=body.reject is True,
         dismiss=body.dismiss is True,
+        release=body.release is True,
+        resolve=body.resolve,
     )
     await store.decide_proposal(conn, ref, decision, datetime.now(UTC))
     return _view(await store.proposal(conn, ref))
@@ -314,6 +321,9 @@ class GuestOutcome(BaseModel):
     credit_expiry_months: int | None
     # the clauses behind the outcome, cut from the wording when the operator decided
     clauses: list[str]
+    # what it did so far: refunded, refund_processing, refund_refused, not_charged, credited,
+    # waiting_for_payment, released or none
+    status: str
 
 
 class GuestSettlement(BaseModel):

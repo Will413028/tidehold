@@ -198,7 +198,7 @@ async def execute(
 
 # What a read of PayPal says about a command: settled either way, still undecided (nothing is
 # sent or recorded), not done at PayPal (send it again under its key), or held: not done as far
-# as the read shows, but PayPal refused its resend already.
+# as the read shows, but PayPal refused its resend already (the operator is asked, step 8b).
 Read = Literal["succeeded", "rejected", "undecided", "resend", "held"]
 REFUND_SETTLED: dict[str, Read] = {
     "COMPLETED": "succeeded",
@@ -376,15 +376,13 @@ async def reconcile_due(conn: Conn, client: PayPalClient, payment_id: UUID) -> N
     is unknown (a read or a send that failed) it backs off and, after the failures in a row
     `due_actions` allows, fails for the operator; a refund PayPal reports PENDING is only
     waiting, so it is read again every `PENDING_REFUND_READ_EVERY` until it ends. A command held
-    for the operator does not count as a failure while a refund beside it is still read; alone,
-    it backs off and fails for the operator console, until step 8b asks."""
+    for the operator (PayPal refused its resend, no read settles it) is not retried: the
+    settlement's `command_open` ask (plan step 8b) takes it to the operator."""
     outcomes = await reconcile(conn, client, payment_id, TEST_CARD)
     if "unknown" in outcomes.values():
         raise due.RetryLater("PAYPAL_OUTCOME_STILL_UNKNOWN")
     if "pending" in outcomes.values():
         raise due.Waiting(PENDING_REFUND_READ_EVERY, "PAYPAL_REFUND_PENDING")
-    if "held" in outcomes.values():
-        raise due.RetryLater("PAYPAL_RESEND_REFUSED")
 
 
 class PaymentRefused(Conflict):

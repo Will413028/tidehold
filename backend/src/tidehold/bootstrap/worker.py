@@ -44,6 +44,7 @@ def handlers(
 
 async def tick(conn: Conn, run: Mapping[due.Kind, due.Handler], now: datetime) -> int:
     await watch.ensure_schedules(conn, now)
+    await watch.open_command_asks(conn)
     await execute.ensure_schedules(conn, now)
     return await due.run_due(conn, run, now)
 

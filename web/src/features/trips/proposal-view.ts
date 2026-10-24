@@ -1,18 +1,16 @@
 import { formatUsd } from "@/lib/money";
 import type { Line, Proposal } from "./console-types";
 
-type Purpose = "deposit" | "balance";
-
 /** One guest's part of an option; amounts come from the proposal, computed by code. */
-export function lineText(line: Line, names: Map<string, string>, purpose: Purpose): string {
+export function lineText(line: Line, names: Map<string, string>): string {
   const who = names.get(line.guest_id) ?? "a guest";
   if (line.kind === "none" || line.amount_minor === 0) return `${who}: nothing`;
   if (line.kind === "credit") {
     const expiry = line.credit_expiry_months ? `, expires after ${line.credit_expiry_months} months` : "";
     return `${who}: credit ${formatUsd(line.amount_minor)}${expiry}`;
   }
-  // a refund returns a captured deposit and releases part of a held balance
-  return `${who}: ${purpose === "deposit" ? "refund" : "release"} ${formatUsd(line.amount_minor)}`;
+  // a refund of a paid payment, or taken off what is still due on an unpaid one (step 8b)
+  return `${who}: refund ${formatUsd(line.amount_minor)}`;
 }
 
 type Cancellation = { covered_days: number[]; whole_trip: boolean; cause: string };
@@ -34,7 +32,7 @@ export function askTitle(p: Proposal): string {
     const w = facts.warning as { event: string; trip_day: number };
     return `${w.event} in force on day ${w.trip_day}`;
   }
-  if (p.kind === "unauthorized_guest") return `${String(facts.guest)} has no balance hold`;
+  if (p.kind === "unpaid_balance") return `${String(facts.guest)} has not paid the balance`;
   return `${p.question.split(". ")[0].replace(/\.$/, "")}.`;
 }
 

@@ -4,8 +4,10 @@ Settlement starts only here, from the operator's recorded cancellation: the boun
 evaluated against the evidence visible at that moment, with no model call, and the result is
 one proposal. Inside the trip's mandate it is accepted at once; otherwise it asks, and the
 operator chooses an option or rejects. Asks of other kinds (a warning without a cancellation,
-a guest without an authorization, a refused PayPal command) are proposals too, one per trip,
-kind and subject. Design: docs/plans/2026-10-19-tidehold-hackathon/step8a-design.md.
+a balance unpaid at its due date, a refused or undecided PayPal
+command) are proposals too, one per trip,
+kind and subject. Design: docs/plans/2026-10-19-tidehold-hackathon/step8a-design.md, and
+step8b-design.md for the money each accepted settlement moves when it is decided.
 """
 
 from collections.abc import Mapping, Sequence
@@ -17,12 +19,13 @@ from uuid import UUID
 from psycopg.rows import DictRow
 from psycopg.types.json import Jsonb
 
+from tidehold.money import commands
 from tidehold.platform import due_actions as due
 from tidehold.platform.db import Conn, insert_returning
 from tidehold.platform.errors import Conflict, Invalid, NotFound
 from tidehold.policy import versions
 from tidehold.policy.schema import Rule
-from tidehold.settlement import matching
+from tidehold.settlement import matching, moves
 from tidehold.settlement.evaluate import (
     PURPOSES,
     Cancelled,
@@ -37,7 +40,7 @@ from tidehold.settlement.evaluate import (
 )
 from tidehold.trips import store as trips
 
-Kind = Literal["settlement", "warning", "unauthorized_guest", "money_refused", "late_payment"]
+Kind = Literal["settlement", "warning", "unpaid_balance", "money_refused", "command_open"]
 Cause = Literal["weather", "safety", "other"]
 
 REASON_TEXT: dict[str, str] = {
@@ -57,18 +60,6 @@ class NewCancellation:
     scope: Literal["day", "rest"]
     trip_day: int
     cause: Cause
-
-
-def add_months(at: datetime, months: int) -> datetime:
-    """The same day `months` later, clamped to the month's last day."""
-    month = at.month - 1 + months
-    year, month = at.year + month // 12, month % 12 + 1
-    for day in range(at.day, 0, -1):
-        try:
-            return at.replace(year=year, month=month, day=day)
-        except ValueError:
-            continue
-    raise ValueError("no day in month")  # unreachable: every month has a first day
 
 
 async def _trip_locked(conn: Conn, workspace_id: UUID, trip_id: UUID) -> DictRow:
@@ -121,11 +112,10 @@ async def _returned(conn: Conn, trip_id: UUID) -> dict[str, dict[str, int]]:
 
 
 def _money(guest: DictRow, returned: Mapping[str, int]) -> GuestMoney:
-    deposit = 0
-    if guest["deposit_state"] == "captured":
-        deposit = guest["deposit_captured_minor"] - guest["deposit_refunded_minor"]
-    balance = guest["balance_minor"] if guest["balance_state"] == "authorized" else 0
-    return GuestMoney(str(guest["id"]), deposit, balance, returned)
+    """What the guest owes on each payment, paid yet or not: a refund line on a payment not yet
+    paid lowers what is due on it, and later settlements net only through `returned` (step 8b
+    design, "The plan's text does not add up")."""
+    return GuestMoney(str(guest["id"]), guest["deposit_minor"], guest["balance_minor"], returned)
 
 
 @dataclass(frozen=True)
@@ -168,38 +158,29 @@ async def _accept(
     by: Literal["mandate", "operator"],
     now: datetime,
 ) -> None:
-    """Accept a settlement: record the choice and the deposit credits, and move money at once
-    when the whole trip is cancelled (balance captures and day cancellations wait for finalize,
-    step 8b)."""
-    await conn.execute(
-        "update proposals set state = 'accepted', choice = %s, decided_by = %s, decided_at = %s"
-        " where id = %s",
-        (Jsonb(dict(choice)), by, now, proposal["id"]),
-    )
-    for line in proposal["parts"]["deposit"][choice["deposit"]]["lines"]:
-        if line["kind"] == "credit" and line["amount_minor"] > 0:
-            months = line["credit_expiry_months"]
-            await conn.execute(
-                "insert into credits (workspace_id, guest_id, proposal_id, purpose, amount_minor,"
-                " expires_at) values (%s, %s, %s, 'deposit', %s, %s)",
-                (
-                    proposal["workspace_id"],
-                    line["guest_id"],
-                    proposal["id"],
-                    line["amount_minor"],
-                    add_months(now, months) if months else None,
-                ),
-            )
-    # the one rest-of-trip cancellation of a trip cancelled as a whole
-    whole_trip = await (
+    """Accept a settlement and move what needs no PayPal call at once, day and whole trip
+    alike: a refund of a payment not yet paid lowers what is due on it (its unsent checkouts
+    close), and a credit on a captured payment is written. The rest (refunds through PayPal, a
+    payment at PayPal, a credit waiting for its payment) goes to `settle_proposal`."""
+    accepted = await (
         await conn.execute(
-            "select 1 from cancellations c join trips t on t.id = c.trip_id"
-            " where c.id = %s and c.scope = 'rest' and t.cancelled_at is not null",
-            (proposal["cancellation_id"],),
+            "update proposals set state = 'accepted', choice = %s, decided_by = %s,"
+            " decided_at = %s where id = %s returning *",
+            (Jsonb(dict(choice)), by, now, proposal["id"]),
         )
     ).fetchone()
-    if whole_trip is not None:
-        await due.schedule(conn, "settle_proposal", proposal["id"], due_at=now)
+    if accepted is None:
+        raise NotFound
+    final = [
+        await moves.run_without_paypal(conn, accepted, line)
+        for line in moves.lines(accepted, await trips.guests(conn, accepted["trip_id"]))
+    ]
+    if all(final):
+        await conn.execute(
+            "update proposals set state = 'executed' where id = %s", (accepted["id"],)
+        )
+    else:
+        await due.schedule(conn, "settle_proposal", accepted["id"], due_at=now)
 
 
 def _what(cancellation: NewCancellation, starts_on: date) -> str:
@@ -281,7 +262,9 @@ async def record_cancellation(
         rules, clauses = await _rules(conn, trip, covered, now)
         returned = await _returned(conn, trip_id)
         guests = [
-            _money(g, returned.get(str(g["id"]), {})) for g in await trips.guests(conn, trip_id)
+            _money(g, returned.get(str(g["id"]), {}))
+            for g in await trips.guests(conn, trip_id)
+            if g["released_at"] is None  # a released guest owes nothing more
         ]
         cancelled = Cancelled(new.scope, new.cause, new.trip_day, len(covered), trip["days"])
         evaluation = evaluate(rules, cancelled, guests)
@@ -393,11 +376,111 @@ async def _withdraw(conn: Conn, settlement: DictRow, now: datetime) -> None:
 
 @dataclass(frozen=True)
 class OperatorDecision:
-    """Exactly one of: accept these option indexes, reject a settlement, dismiss an ask."""
+    """Exactly one of: accept these option indexes, reject a settlement, dismiss an ask (for
+    an unpaid balance: wait), release the guest of an unpaid balance, or resolve an open
+    command from what the operator found at PayPal."""
 
     accept: Mapping[str, int] | None = None
     reject: bool = False
     dismiss: bool = False
+    release: bool = False
+    resolve: Literal["found", "not_found"] | None = None
+
+
+def _subject_id(ask: DictRow) -> UUID:
+    return UUID(ask["subject"].split(":", 1)[1])
+
+
+async def _release(conn: Conn, ask: DictRow, now: datetime) -> None:
+    """Release the guest of an unpaid balance (D21): it owes nothing more, so what is left of
+    its balance is waived under this ask; no money moves. Its deposit stays with the operator
+    under its own terms, except what a settlement already decided for it, which still moves.
+    Later settlements leave the guest out, and the accepted ones still waiting on its balance
+    run again to finish without it."""
+    guest = await trips.guest(conn, _subject_id(ask))
+    if guest["released_at"] is not None:
+        raise Conflict("GUEST_ALREADY_RELEASED")
+    due_minor = guest["balance_minor"] - guest["balance_waived_minor"]
+    if guest["balance_state"] == "captured":
+        raise Conflict("BALANCE_PAID")
+    if due_minor > 0:
+        match await commands.waive(
+            conn, guest["balance_id"], amount_minor=due_minor, proposal_id=ask["id"]
+        ):
+            case "captured":
+                raise Conflict("BALANCE_PAID")
+            case "in_flight":
+                raise Conflict("BALANCE_PAYMENT_IN_FLIGHT")
+            case "waived" | "already":
+                pass
+    await conn.execute(
+        "update guests set released_at = %s, released_by = %s where id = %s",
+        (now, ask["id"], guest["id"]),
+    )
+    for row in await (
+        await conn.execute(
+            "select id from proposals where trip_id = %s and kind = 'settlement'"
+            " and state = 'accepted'",
+            (ask["trip_id"],),
+        )
+    ).fetchall():
+        await due.wake(conn, "settle_proposal", row["id"], due_at=now)
+
+
+async def _resolve(conn: Conn, ask: DictRow, *, found: bool, now: datetime) -> None:
+    """Close a command no read could decide from what the operator found at PayPal; the
+    settlement that sent it finishes from there (a refund not found asks as refused). A command
+    a read settled since the ask opened needs no answer: the ask is answered as it stands."""
+    try:
+        command = await commands.resolve_by_operator(conn, _subject_id(ask), found=found)
+    except Conflict as error:
+        if error.code != "MONEY_COMMAND_NOT_OPEN":
+            raise
+        return
+    if command["proposal_id"] is not None:
+        await due.wake(conn, "settle_proposal", command["proposal_id"], due_at=now)
+
+
+Answer = Literal["accept", "reject", "dismiss", "release", "resolve"]
+# Which answers each kind of proposal takes: a settlement is accepted or rejected (it is never
+# dismissed: the cancellation stands or is withdrawn); an unpaid balance is waited for
+# (dismiss) or its guest released; an open command is resolved from what PayPal shows, never
+# dismissed, which would leave it open for ever (step 8b design, review finding 2).
+ANSWERS: dict[str, frozenset[Answer]] = {
+    "settlement": frozenset({"accept", "reject"}),
+    "warning": frozenset({"dismiss"}),
+    "money_refused": frozenset({"dismiss"}),
+    "unpaid_balance": frozenset({"dismiss", "release"}),
+    "command_open": frozenset({"resolve"}),
+}
+
+
+STATE_AFTER: dict[Answer, str] = {
+    "accept": "accepted",
+    "reject": "rejected",
+    "release": "answered",
+    "resolve": "answered",
+    "dismiss": "dismissed",
+}
+
+
+def _answer(decision: OperatorDecision) -> Answer:
+    if decision.accept is not None:
+        return "accept"
+    if decision.resolve is not None:
+        return "resolve"
+    if decision.release:
+        return "release"
+    return "reject" if decision.reject else "dismiss"
+
+
+def _choice(row: DictRow, accept: Mapping[str, int]) -> dict[str, int]:
+    choice = dict(accept)
+    if set(choice) != set(PURPOSES) or any(
+        not 0 <= i < len(row["parts"][p]) for p, i in choice.items()
+    ):
+        raise Invalid("CHOICE_INVALID")
+    return choice
 
 
 async def decide_proposal(conn: Conn, ref: Ref, decision: OperatorDecision, now: datetime) -> None:
@@ -406,29 +489,23 @@ async def decide_proposal(conn: Conn, ref: Ref, decision: OperatorDecision, now:
         row = await proposal(conn, ref)
         if row["state"] != "asked":
             raise Conflict("PROPOSAL_ALREADY_DECIDED")
-        settlement = row["kind"] == "settlement"
-        if decision.dismiss:
-            if settlement:
-                raise Conflict("SETTLEMENT_NOT_DISMISSABLE")
-            state = "dismissed"
-        elif decision.reject:
-            if not settlement:
-                raise Conflict("ONLY_A_SETTLEMENT_IS_REJECTED")
-            state = "rejected"
-            await _withdraw(conn, row, now)
-        else:
-            if not settlement or decision.accept is None:
-                raise Conflict("ONLY_A_SETTLEMENT_IS_ACCEPTED")
-            parts = row["parts"]
-            choice = dict(decision.accept)
-            if set(choice) != set(PURPOSES) or any(
-                not 0 <= i < len(parts[p]) for p, i in choice.items()
-            ):
-                raise Invalid("CHOICE_INVALID")
-            await _accept(conn, row, choice, "operator", now)
-            return
+        answer = _answer(decision)
+        if answer not in ANSWERS[row["kind"]]:
+            raise Conflict(f"{row['kind'].upper()}_TAKES_NO_{answer.upper()}")
+        match answer:
+            case "accept":
+                await _accept(conn, row, _choice(row, decision.accept or {}), "operator", now)
+                return
+            case "reject":
+                await _withdraw(conn, row, now)
+            case "release":
+                await _release(conn, row, now)
+            case "resolve":
+                await _resolve(conn, row, found=decision.resolve == "found", now=now)
+            case "dismiss":
+                pass
         await conn.execute(
             "update proposals set state = %s, decided_by = 'operator', decided_at = %s"
             " where id = %s",
-            (state, now, ref.proposal_id),
+            (STATE_AFTER[answer], now, ref.proposal_id),
         )

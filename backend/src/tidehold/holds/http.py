@@ -29,14 +29,18 @@ OrderId = Annotated[str, Path(pattern=r"^[A-Z0-9]{8,32}$")]
 class Payment(BaseModel):
     state: str
     amount_minor: int
+    # what is still to pay: the amount less what the operator's settlements took off it before
+    # it was paid (plan step 8b); 0 once captured
+    due_minor: int
     captured_minor: int
+    refunded_minor: int
 
 
 class Balance(BaseModel):
     # the local date in the trip's time zone
     due_on: date
     amount_minor: int
-    payment: Payment | None  # None only for a guest invited before migration 0015
+    payment: Payment
 
 
 class GuestView(BaseModel):
@@ -49,6 +53,8 @@ class GuestView(BaseModel):
     days: int
     deposit: Payment
     balance: Balance
+    # the operator released the guest from its unpaid balance: nothing more is paid
+    released: bool
 
 
 class Order(BaseModel):
@@ -60,32 +66,34 @@ def _due_on(trip: DictRow, guest: DictRow) -> date:
     return due.astimezone(ZoneInfo(trip["timezone"])).date()
 
 
+def _money(guest: DictRow, purpose: Purpose) -> Payment:
+    state = guest[f"{purpose}_state"]
+    amount = guest[f"{purpose}_minor"]
+    return Payment(
+        state=state,
+        amount_minor=amount,
+        due_minor=0 if state == "captured" else amount - guest[f"{purpose}_waived_minor"],
+        captured_minor=guest[f"{purpose}_captured_minor"],
+        refunded_minor=guest[f"{purpose}_refunded_minor"],
+    )
+
+
 async def _view(conn: Conn, token: str) -> GuestView:
     guest = await store.guest_by_token(conn, token)
     trip = await store.trip(conn, guest["workspace_id"], guest["trip_id"])
-    balance = None
-    if guest["balance_id"] is not None:
-        balance = Payment(
-            state=guest["balance_state"],
-            amount_minor=guest["balance_minor"],
-            captured_minor=guest["balance_captured_minor"],
-        )
     return GuestView(
         guest_name=guest["name"],
         trip_name=trip["name"],
         starts_on=trip["starts_on"],
         ends_on=store.ends_on(trip["starts_on"], trip["days"]),
         days=trip["days"],
-        deposit=Payment(
-            state=guest["deposit_state"],
-            amount_minor=guest["deposit_minor"],
-            captured_minor=guest["deposit_captured_minor"],
-        ),
+        deposit=_money(guest, "deposit"),
         balance=Balance(
             due_on=_due_on(trip, guest),
             amount_minor=trip["balance_minor"],
-            payment=balance,
+            payment=_money(guest, "balance"),
         ),
+        released=guest["released_at"] is not None,
     )
 
 
@@ -94,9 +102,9 @@ async def _payment(conn: Conn, token: str, purpose: Purpose) -> UUID:
     trip = await store.trip(conn, guest["workspace_id"], guest["trip_id"])
     if trip["cancelled_at"] is not None:
         raise Conflict("TRIP_CANCELLED")
-    payment_id: UUID | None = guest["deposit_id"] if purpose == "deposit" else guest["balance_id"]
-    if payment_id is None:
-        raise Conflict("NO_BALANCE_PAYMENT")
+    if guest["released_at"] is not None:
+        raise Conflict("GUEST_RELEASED")
+    payment_id: UUID = guest["deposit_id"] if purpose == "deposit" else guest["balance_id"]
     return payment_id
 
 

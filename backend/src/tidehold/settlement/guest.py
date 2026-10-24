@@ -24,6 +24,8 @@ class Outcome:
     amount_minor: int
     credit_expiry_months: int | None
     clauses: list[str]
+    # what the line did to the payment so far (`STATUS`), read from the payment's records
+    status: str
 
 
 @dataclass(frozen=True)
@@ -48,14 +50,61 @@ def _warnings(facts: Mapping[str, Any]) -> list[dict[str, Any]]:
     return list(seen.values())
 
 
-def _outcomes(proposal: DictRow, guest_id: str) -> list[Outcome]:
+# What a refund command's status means to the guest.
+REFUND_STATUS = {
+    "succeeded": "refunded",
+    "rejected": "refund_refused",
+    "pending": "refund_processing",
+    "unknown": "refund_processing",
+}
+
+
+CREDITED = (
+    "select 'credited' as status from credits where proposal_id = %(proposal)s"
+    " and guest_id = %(guest)s and purpose = %(purpose)s"
+)
+# a waiver ranks before the refund command, the latest of which says how far it got
+REFUNDED = (
+    "select 'not_charged' as status, 0 as rank from payment_waivers"
+    " where proposal_id = %(proposal)s and payment_id = %(payment)s"
+    " union all (select status, 1 from money_commands where proposal_id = %(proposal)s"
+    " and payment_id = %(payment)s and kind = 'refund' order by created_at desc limit 1)"
+    " order by 2 limit 1"
+)
+
+
+async def _status(conn: Conn, proposal: DictRow, guest: DictRow, purpose: str, line: Any) -> str:
+    """One of `none`, `refunded`, `refund_processing`, `refund_refused`, `not_charged` (taken
+    off a payment before it was paid), `credited`, `waiting_for_payment` or `released`."""
+    if line["kind"] == "none" or line["amount_minor"] == 0:
+        return "none"
+    key = {
+        "proposal": proposal["id"],
+        "payment": guest[f"{purpose}_id"],
+        "guest": guest["id"],
+        "purpose": purpose,
+    }
+    row = await (
+        await conn.execute(CREDITED if line["kind"] == "credit" else REFUNDED, key)
+    ).fetchone()
+    if row is not None:
+        status = str(REFUND_STATUS.get(row["status"], row["status"]))
+        return status
+    if purpose == "balance" and guest["released_at"] is not None:
+        return "released"
+    if guest[f"{purpose}_state"] == "captured" and line["kind"] == "refund":
+        return "refund_processing"
+    return "waiting_for_payment"
+
+
+async def _outcomes(conn: Conn, proposal: DictRow, guest: DictRow) -> list[Outcome]:
     if proposal["state"] not in ("accepted", "executed") or proposal["choice"] is None:
         return []
     clauses = proposal["facts"]["clauses"]
     outcomes = []
     for purpose in ("deposit", "balance"):
         option = proposal["parts"][purpose][proposal["choice"][purpose]]
-        line = next((x for x in option["lines"] if x["guest_id"] == guest_id), None)
+        line = next((x for x in option["lines"] if x["guest_id"] == str(guest["id"])), None)
         if line is None:  # invited after the decision
             continue
         outcomes.append(
@@ -65,6 +114,7 @@ def _outcomes(proposal: DictRow, guest_id: str) -> list[Outcome]:
                 amount_minor=line["amount_minor"],
                 credit_expiry_months=line["credit_expiry_months"],
                 clauses=[clauses[i]["quote"] for i in option.get("rules", [])],
+                status=await _status(conn, proposal, guest, purpose, line),
             )
         )
     return outcomes
@@ -115,7 +165,7 @@ async def view(conn: Conn, token: str) -> tuple[list[Settlement], list[DictRow]]
         facts, cancellation = row["facts"], row["facts"]["cancellation"]
         days = cancellation["covered_days"]
         warnings = _warnings(facts)
-        outcomes = _outcomes(row, str(guest["id"]))
+        outcomes = await _outcomes(conn, row, guest)
         decided = row["state"] != "asked"
         settlements.append(
             Settlement(

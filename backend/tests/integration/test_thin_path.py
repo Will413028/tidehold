@@ -22,12 +22,21 @@ async def test_a_guest_link_shows_the_guests_trip(
     body = guest.json()
     assert (body["guest_name"], body["trip_name"]) == ("Ana", "Anilao weekend")
     assert (body["starts_on"], body["ends_on"], body["days"]) == ("2026-12-05", "2026-12-07", 3)
-    assert body["deposit"] == {"state": "pending", "amount_minor": 5000, "captured_minor": 0}
+    assert body["deposit"] == {
+        "state": "pending",
+        "amount_minor": 5000,
+        "due_minor": 5000,
+        "captured_minor": 0,
+        "refunded_minor": 0,
+    }
     assert body["balance"]["payment"] == {
         "state": "pending",
         "amount_minor": 30000,
+        "due_minor": 30000,
         "captured_minor": 0,
+        "refunded_minor": 0,
     }
+    assert body["released"] is False
     assert "workspace" not in str(body)
     assert "id" not in body
 
