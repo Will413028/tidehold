@@ -1,0 +1,134 @@
+"""The deploy's compose project (plan step 10a), as `docker compose config` resolves it: the
+isolation, secrets by path and limits the design promises (step10a-design.md section 3).
+Needs Docker, like the integration suite."""
+
+import json
+import os
+import re
+import subprocess
+import unittest
+from pathlib import Path
+from typing import Any
+
+DEPLOY = Path(__file__).resolve().parent.parent / "deploy"
+PLACEHOLDERS = {
+    "TIDEHOLD_REVISION": "abc1234",
+    "TIDEHOLD_ORIGIN": "https://tidehold.example.ts.net",
+    "TIDEHOLD_SECRETS_DIR": "/host/tidehold-secrets",
+    "SHARED_SECRETS_DIR": "/host/shared-secrets",
+}
+
+
+def resolved() -> dict[str, Any]:
+    # env files are named, not read: the secrets stay on the VM (D13)
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-p",
+            "tidehold",
+            "-f",
+            "compose.yaml",
+            "--profile",
+            "maintenance",
+            "config",
+            "--format",
+            "json",
+            "--no-env-resolution",
+        ],
+        cwd=DEPLOY,
+        env={**os.environ, **PLACEHOLDERS},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    project: dict[str, Any] = json.loads(result.stdout)
+    return project
+
+
+class ComposeProjectTest(unittest.TestCase):
+    project: dict[str, Any]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.project = resolved()
+
+    def test_the_project_is_isolated_and_publishes_no_port(self) -> None:
+        services = self.project["services"]
+
+        self.assertEqual(self.project["name"], "tidehold")
+        self.assertEqual(
+            set(services), {"db", "migrate", "ingest", "net", "api", "web", "ts", "audit"}
+        )
+        self.assertEqual([name for name, s in services.items() if s.get("ports")], [])
+        self.assertEqual(
+            {name for name, s in services.items() if s.get("network_mode")}, {"api", "web"}
+        )
+
+    def test_every_service_has_memory_and_cpu_limits(self) -> None:
+        for name, service in self.project["services"].items():
+            with self.subTest(name):
+                self.assertLessEqual(int(service["mem_limit"]), 512 * 2**20)
+                self.assertTrue(0 < float(service["cpus"]) <= 0.5)
+
+    def test_secrets_are_referenced_by_path_and_only_where_needed(self) -> None:
+        files = {
+            name: [entry["path"] for entry in service.get("env_file", [])]
+            for name, service in self.project["services"].items()
+        }
+
+        self.assertEqual({name for name, paths in files.items() if paths}, {"api", "audit"})
+        self.assertEqual(
+            files["api"],
+            [
+                "/host/shared-secrets/paypal.env",
+                "/host/shared-secrets/models.env",
+                "/host/tidehold-secrets/anthropic.env",
+            ],
+        )
+        self.assertEqual(files["audit"], ["/host/shared-secrets/paypal.env"])  # no model keys
+        self.assertEqual(
+            self.project["secrets"]["db_password"]["file"], "/host/tidehold-secrets/db_password"
+        )
+        for name, service in self.project["services"].items():
+            for key in service.get("environment") or {}:
+                self.assertIsNone(re.search(r"KEY|SECRET|PASSWORD$", key), (name, key))
+
+    def test_paypal_is_the_sandbox_wherever_it_is_configured(self) -> None:
+        for name in ("api", "audit"):
+            env = self.project["services"][name]["environment"]
+            self.assertEqual(env["PAYPAL_ENV"], "sandbox", name)
+
+    def test_the_recordings_are_mounted_read_only(self) -> None:
+        (mount,) = self.project["services"]["ingest"]["volumes"]
+
+        self.assertEqual(
+            (mount["source"], mount["target"]), ("/var/lib/tidehold-recorder", "/recordings")
+        )
+        self.assertTrue(mount["read_only"])
+
+    def test_the_reconciliation_log_survives_the_rebuild(self) -> None:
+        script = (DEPLOY / "nightly.sh").read_text()
+
+        self.assertEqual(re.findall(r"docker volume rm (\S+)", script), ["tidehold_db-data"])
+        self.assertIn("reconcile-log", self.project["volumes"])
+
+    def test_third_party_images_are_pinned_by_digest(self) -> None:
+        images = [s["image"] for s in self.project["services"].values()]
+        for dockerfile in ("backend.Dockerfile", "web.Dockerfile"):
+            images += re.findall(r"^FROM (\S+)", (DEPLOY / dockerfile).read_text(), re.M)
+        third_party = [i for i in images if not i.startswith("tidehold-")]
+
+        self.assertEqual(len(third_party), 4)
+        for image in third_party:
+            self.assertRegex(image, r":[\w.-]+@sha256:[0-9a-f]{64}$")
+
+    def test_the_nightly_job_avoids_the_fallbacks_hour(self) -> None:
+        timer = (DEPLOY / "tidehold-nightly.timer").read_text()
+        (calendar,) = re.findall(r"^OnCalendar=(.+)$", timer, re.M)
+
+        self.assertEqual(calendar, "*-*-* 11:00:00 UTC")
+
+
+if __name__ == "__main__":
+    unittest.main()

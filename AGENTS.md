@@ -45,6 +45,7 @@ Web (`web/src/`): `app` → `features` → `lib`. A feature does not import anot
 - `make coverage`: line and branch coverage of `money`, `holds` and `settlement`, report only (no threshold); read it at each step's acceptance.
 - `docs/threat-model.md` lists every security control with the test that proves it; change it in the same commit as the surface it describes.
 - Local dev: `make dev-db`, `make dev-backend`, `make dev-web`.
+- Demo deploy: `deploy/` is the compose project `tidehold` (images, nightly reconciliation and rebuild, `deploy/README.md`); `scripts/test_deploy.py` checks its resolved config in `make check` (needs Docker). Its images are pinned by tag and digest and updated by Dependabot.
 
 ## Dependencies
 

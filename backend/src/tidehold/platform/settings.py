@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from psycopg.conninfo import make_conninfo
+
 # D22: the developer's choice from the run at prompt 00bdb5c3b65fa352 (model-benchmark.md).
 DEFAULT_COMPILE_MODEL = "anthropic:claude-sonnet-5-5"
 
@@ -81,8 +83,15 @@ def model_keys_from_env() -> ModelKeys:
 
 
 def database_url_from_env() -> str:
-    """What the migration command needs, without the web settings."""
-    return os.environ["DATABASE_URL"]
+    """What the migration command needs, without the web settings. With
+    `DATABASE_PASSWORD_FILE` (the deploy's compose secret), the password comes from that file,
+    so it never sits in the environment (plan step 10a)."""
+    url = os.environ["DATABASE_URL"]
+    password_file = os.environ.get("DATABASE_PASSWORD_FILE")
+    if password_file is None:
+        return url
+    password = Path(password_file).read_text(encoding="utf-8").rstrip("\n")
+    return make_conninfo(url, password=password)
 
 
 def reconcile_log_dir_from_env() -> Path:

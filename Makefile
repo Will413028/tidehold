@@ -38,7 +38,7 @@ unit:
 	cd backend && uv run --frozen pytest -q ../bench --junitxml=$(REPORTS)/bench.xml
 	$(WEB) test --reporter=default --reporter=junit --outputFile.junit=$(REPORTS)/web.xml
 	cd recorder && $(call UNITTEST,test_recorder,recorder)
-	cd scripts && $(call UNITTEST,test_quality_lock,scripts)
+	cd scripts && $(call UNITTEST,test_quality_lock test_deploy,scripts)
 
 # Starts a throwaway PostgreSQL 18 container (testcontainers); needs Docker.
 integration:

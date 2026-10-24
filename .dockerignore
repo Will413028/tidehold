@@ -1,0 +1,13 @@
+# Allowlist: images get the sources and lockfiles only; env files, test reports, caches and
+# node_modules stay out of the build context (deploy/*.Dockerfile).
+*
+!backend/pyproject.toml
+!backend/uv.lock
+!backend/src/
+!web/
+web/node_modules/
+web/.next/
+web/test-results/
+web/playwright-report/
+**/__pycache__/
+**/.env*

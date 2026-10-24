@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the tidehold demo reconciliation and reset every night
+
+[Timer]
+# 11:00 UTC: an hour after the fallback demo's 10:00 reset, outside its 09:30-10:30 window
+# (03:00 PST, 19:00 in Manila). A run missed while the VM was down runs at boot.
+OnCalendar=*-*-* 11:00:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=Nightly reconciliation and reset of the tidehold demo (sandbox, synthetic data)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/tidehold/deploy
+# TIDEHOLD_REVISION, TIDEHOLD_ORIGIN, TIDEHOLD_SECRETS_DIR, SHARED_SECRETS_DIR; no secret values.
+EnvironmentFile=/home/ubuntu/tidehold/tidehold.env
+ExecStart=/home/ubuntu/tidehold/deploy/nightly.sh
+TimeoutStartSec=15min

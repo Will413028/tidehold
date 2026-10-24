@@ -31,3 +31,24 @@ updates:
     groups:
       web-minor-patch:
         update-types: [minor, patch]
+
+  # The deploy images (plan step 10a), pinned by digest in deploy/*.Dockerfile and compose.yaml.
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      deploy-images:
+        patterns: ["*"]
+
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      deploy-compose:
+        patterns: ["*"]

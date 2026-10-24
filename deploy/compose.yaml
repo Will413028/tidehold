@@ -1,0 +1,160 @@
+# tidehold demo (plan step 10; design docs/plans/2026-10-19-tidehold-hackathon/step10a-design.md).
+# PayPal sandbox and synthetic data only; the database is rebuilt every night by nightly.sh.
+# Nothing publishes a host port: the only way in is Tailscale Funnel to web.
+#
+# Host files, referenced by path and never read by anyone but the containers (D13):
+#   ${SHARED_SECRETS_DIR}/paypal.env    the fallback demo's sandbox app (PAYPAL_CLIENT_ID, ..._SECRET)
+#   ${SHARED_SECRETS_DIR}/models.env    the fallback demo's model keys (either may be empty)
+#   ${TIDEHOLD_SECRETS_DIR}/db_password random database password
+#   ${TIDEHOLD_SECRETS_DIR}/anthropic.env  ANTHROPIC_API_KEY (optional: without it, no-AI path)
+name: tidehold
+
+x-hardening: &hardening
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: "3"}
+
+x-backend: &backend
+  <<: *hardening
+  image: tidehold-backend:${TIDEHOLD_REVISION:?set TIDEHOLD_REVISION}
+  environment: &backend-env
+    DATABASE_URL: postgresql://tidehold@db:5432/tidehold
+    DATABASE_PASSWORD_FILE: /run/secrets/db_password
+  secrets: [db_password]
+  mem_limit: 256m
+  cpus: 0.5
+
+services:
+  db:
+    <<: *hardening
+    # approved 2026-10-24 (step10a-design.md)
+    image: postgres:18.6-alpine3.24@sha256:898c60cb390d1085bc97bdd6a1ae968757421df394b071848b52b1c09c89d6a5
+    read_only: false  # the official image writes its socket and init files
+    cap_drop: []
+    environment:
+      POSTGRES_USER: tidehold
+      POSTGRES_DB: tidehold
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes: [db-data:/var/lib/postgresql]
+    healthcheck:
+      test: [CMD, pg_isready, -U, tidehold, -d, tidehold]
+      interval: 5s
+      retries: 20
+    mem_limit: 384m
+    cpus: 0.5
+
+  migrate:
+    <<: *backend
+    restart: "no"
+    command: [tidehold.platform.migrate]
+    depends_on:
+      db: {condition: service_healthy}
+
+  # The recorder's files (D14) read into the evidence store once per rebuild; the demo replays
+  # recorded warnings (D12), so nothing needs the files fetched later that day.
+  ingest:
+    <<: *backend
+    restart: "no"
+    command: [tidehold.bootstrap.ingest_warnings, /recordings]
+    volumes:
+      - /var/lib/tidehold-recorder:/recordings:ro
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+
+  # Owns the network namespace api and web share (like a pod's pause container): the API
+  # stays on loopback, and an api restart does not strand web.
+  net:
+    <<: *hardening
+    image: tidehold-backend:${TIDEHOLD_REVISION}
+    entrypoint: [sleep, infinity]
+    mem_limit: 32m
+    cpus: 0.1
+
+  # The API with the due_actions worker in process (runtime ADR); the only service with the
+  # model keys. uvicorn trusts X-Forwarded-For from loopback only (its default), where web
+  # proxies /api, so the client address is the one Tailscale set.
+  api:
+    <<: *backend
+    network_mode: service:net
+    env_file:
+      - "${SHARED_SECRETS_DIR:?set SHARED_SECRETS_DIR}/paypal.env"
+      - "${SHARED_SECRETS_DIR}/models.env"
+      - path: "${TIDEHOLD_SECRETS_DIR:?set TIDEHOLD_SECRETS_DIR}/anthropic.env"
+        required: false
+    environment:
+      <<: *backend-env
+      PAYPAL_ENV: sandbox
+      PUBLIC_ORIGIN: ${TIDEHOLD_ORIGIN:?set TIDEHOLD_ORIGIN}
+    command:
+      - uvicorn
+      - tidehold.bootstrap.app:create_app
+      - --factory
+      - --host=127.0.0.1
+      - --port=8000
+    mem_limit: 512m
+    depends_on:
+      net: {condition: service_started}
+      ingest: {condition: service_completed_successfully}
+
+  web:
+    <<: *hardening
+    image: tidehold-web:${TIDEHOLD_REVISION}
+    network_mode: service:net
+    tmpfs: [/tmp, /app/.next/cache]
+    depends_on: [net, api]
+    mem_limit: 384m
+    cpus: 0.5
+
+  # Public entry: a dedicated Tailscale node with Funnel to web. Its state volume survives the
+  # nightly rebuild, so the hostname never changes.
+  ts:
+    <<: *hardening
+    # the fallback demo's version
+    image: tailscale/tailscale:v1.104.1@sha256:87c55d6be56ad85b3d8bceca5f87f73de288c609131460dd1be1874c250cc41d
+    read_only: false
+    hostname: tidehold
+    environment:
+      TS_HOSTNAME: tidehold
+      TS_EXTRA_ARGS: --advertise-tags=tag:tidehold-demo
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"
+      TS_SERVE_CONFIG: /config/serve.json
+    # First boot prints a login URL (docker compose logs ts); an owner of tag:tidehold-demo
+    # approves it once (step 10b). The identity then lives in ts-state.
+    volumes:
+      - ts-state:/var/lib/tailscale
+      - ./serve.json:/config/serve.json:ro
+    depends_on: [web]
+    mem_limit: 128m
+    cpus: 0.25
+
+  # Maintenance only (nightly.sh): the read-only reconciliation against PayPal (step 10a).
+  audit:
+    <<: *backend
+    restart: "no"
+    profiles: [maintenance]
+    env_file:
+      - "${SHARED_SECRETS_DIR}/paypal.env"
+    environment:
+      <<: *backend-env
+      PAYPAL_ENV: sandbox
+      RECONCILE_LOG_DIR: /var/log/tidehold
+    command: [tidehold.bootstrap.nightly_audit]
+    volumes:
+      - reconcile-log:/var/log/tidehold
+    depends_on:
+      db: {condition: service_healthy}
+
+secrets:
+  db_password: {file: "${TIDEHOLD_SECRETS_DIR}/db_password"}
+
+volumes:
+  db-data:
+  ts-state:
+  reconcile-log:
