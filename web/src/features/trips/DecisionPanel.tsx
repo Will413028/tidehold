@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { ApiError, api } from "@/lib/api";
 import type { Option, Proposal } from "./console-types";
-import { type Decision, decisionBody, lineText } from "./proposal-view";
+import { answers, type Decision, decisionBody, lineText } from "./proposal-view";
 
 const PURPOSES = ["deposit", "balance"] as const;
 
@@ -53,7 +53,7 @@ export function DecisionPanel({
   async function decide(decision: Decision) {
     setError(null);
     try {
-      const body = decisionBody(proposal, choice, decision);
+      const body = decisionBody(choice, decision);
       await api(`/api/trips/${tripId}/proposals/${proposal.id}/decision`, { body });
       onDecided();
     } catch (e) {
@@ -84,20 +84,11 @@ export function DecisionPanel({
               />
             ),
         )}
-      {settlement ? (
-        <>
-          <button type="button" onClick={() => void decide("accept")}>
-            Accept these options
-          </button>
-          <button type="button" onClick={() => void decide("reject")}>
-            Reject: withdraw the cancellation, no money moves
-          </button>
-        </>
-      ) : (
-        <button type="button" onClick={() => void decide("dismiss")}>
-          Dismiss this ask
+      {answers(proposal).map(({ decision, label }) => (
+        <button key={decision} type="button" onClick={() => void decide(decision)}>
+          {label}
         </button>
-      )}
+      ))}
       {error && <p role="alert">{error}</p>}
     </section>
   );
