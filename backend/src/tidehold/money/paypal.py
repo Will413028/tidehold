@@ -1,9 +1,9 @@
 """PayPal Orders v2 / Payments v2 client, pinned to the sandbox.
 
-Ported from dive-trip-agent@8065eba `modules/deposits/paypal.py`; tidehold adds CAPTURE
-orders (the deposit, and the balance since D18), reauthorization (D11, until plan step 8c) and
-reads of an order, a capture and a refund, so an unknown outcome is resolved from PayPal's own
-record before anything is resent (D18 D4).
+Ported from dive-trip-agent@8065eba `modules/deposits/paypal.py`; tidehold places every
+payment as a CAPTURE order (the deposit, and the balance since D18; plan step 8c removed the
+hold calls) and reads an order, a capture and a refund, so an unknown outcome is
+resolved from PayPal's own record before anything is resent (D18 D4).
 
 Every write carries a caller-supplied PayPal-Request-Id, so a retry with the same key
 returns the original result instead of moving money twice. Transport errors, 5xx answers
@@ -16,7 +16,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 import httpx2 as httpx
 
@@ -24,8 +24,6 @@ from tidehold.platform.errors import Conflict, OutcomeUnknown
 
 # Not configurable: no setting can point tidehold at live PayPal.
 SANDBOX_API = "https://api-m.sandbox.paypal.com"
-
-Intent = Literal["CAPTURE", "AUTHORIZE"]
 
 
 class PayPalError(Conflict):
@@ -67,14 +65,6 @@ class PayPalRedirect:
     approved this way needs it (the JS SDK buttons of step 6 approve without a redirect)."""
 
     return_url: str
-
-
-@dataclass(frozen=True)
-class Authorization:
-    authorization_id: str
-    status: str
-    amount_minor: int
-    expires_at: str | None
 
 
 @dataclass(frozen=True)
@@ -205,18 +195,17 @@ class PayPalClient:
     async def create_order(
         self,
         *,
-        intent: Intent,
         invoice_id: str,
         amount_minor: int,
         request_id: str,
         source: SandboxCard | PayPalRedirect | None = None,
     ) -> dict[str, Any]:
         """Without a source, an order the buyer approves in PayPal's checkout buttons; with a
-        redirect, one approved on PayPal's page. No money moves until we capture or authorize
-        it. With the server's sandbox card, PayPal processes the order at once: the answer
-        carries the capture or the authorization."""
+        redirect, one approved on PayPal's page. No money moves until we capture it. With the
+        server's sandbox card, PayPal processes the order at once: the answer carries the
+        capture."""
         body: dict[str, Any] = {
-            "intent": intent,
+            "intent": "CAPTURE",
             "purchase_units": [{"invoice_id": invoice_id, "amount": usd(amount_minor)}],
         }
         match source:
@@ -239,49 +228,6 @@ class PayPalClient:
     async def capture_order(self, order_id: str, *, request_id: str) -> dict[str, Any]:
         return await self._call("POST", f"/v2/checkout/orders/{order_id}/capture", {}, request_id)
 
-    async def authorize_order(self, order_id: str, *, request_id: str) -> dict[str, Any]:
-        return await self._call("POST", f"/v2/checkout/orders/{order_id}/authorize", {}, request_id)
-
-    async def capture(
-        self,
-        authorization_id: str,
-        *,
-        amount_minor: int,
-        invoice_id: str,
-        request_id: str,
-    ) -> Capture:
-        capture = await self._call(
-            "POST",
-            f"/v2/payments/authorizations/{authorization_id}/capture",
-            # Always final (D11: balance money moves once); the rest of the hold is released.
-            {"amount": usd(amount_minor), "final_capture": True, "invoice_id": invoice_id},
-            request_id,
-        )
-        with answered("PAYPAL_CAPTURE_UNEXPECTED"):
-            return Capture(str(capture["id"]), str(capture["status"]), minor_of(capture["amount"]))
-
-    async def void(self, authorization_id: str, *, request_id: str) -> None:
-        await self._call(
-            "POST", f"/v2/payments/authorizations/{authorization_id}/void", {}, request_id
-        )
-
-    async def reauthorize(
-        self, authorization_id: str, *, amount_minor: int, request_id: str
-    ) -> Authorization:
-        auth = await self._call(
-            "POST",
-            f"/v2/payments/authorizations/{authorization_id}/reauthorize",
-            {"amount": usd(amount_minor)},
-            request_id,
-        )
-        with answered("PAYPAL_REAUTHORIZATION_UNEXPECTED"):
-            return Authorization(
-                str(auth["id"]),
-                str(auth["status"]),
-                minor_of(auth["amount"]),
-                auth.get("expiration_time"),
-            )
-
     async def refund(
         self, capture_id: str, *, amount_minor: int, invoice_id: str, request_id: str
     ) -> Refund:
@@ -294,7 +240,7 @@ class PayPalClient:
         return refund_of(refund)
 
     async def get_order(self, order_id: str) -> dict[str, Any]:
-        """The order with its captures, authorizations and refunds, as PayPal shows it now."""
+        """The order with its captures and refunds, as PayPal shows it now."""
         return await self._call("GET", f"/v2/checkout/orders/{order_id}")
 
     async def get_capture(self, capture_id: str) -> Capture:
@@ -319,17 +265,6 @@ def _first_payment(order: dict[str, Any], kind: str) -> dict[str, Any]:
         raise PayPalUnexpectedResponse(f"PAYPAL_{kind.upper()}_MISSING")
     first: dict[str, Any] = found[0]
     return first
-
-
-def authorization_of(order: dict[str, Any]) -> Authorization:
-    with answered("PAYPAL_AUTHORIZATION_UNEXPECTED"):
-        auth = _first_payment(order, "authorizations")
-        return Authorization(
-            str(auth["id"]),
-            str(auth["status"]),
-            minor_of(auth["amount"]),
-            auth.get("expiration_time"),
-        )
 
 
 def refund_of(refund: dict[str, Any]) -> Refund:

@@ -24,7 +24,6 @@ from tidehold.money.paypal import (
     PayPalUnknownOutcome,
     Refund,
     SandboxCard,
-    authorization_of,
     capture_of,
     order_id_of,
     refunds_of,
@@ -54,46 +53,28 @@ class OutcomePending(PayPalUnknownOutcome):
         self.result = result
 
 
-def _placed_by(order: dict[str, Any], command: DictRow, *, capture: bool) -> dict[str, Any]:
+def _placed_by(order: dict[str, Any], command: DictRow) -> dict[str, Any]:
     """What an order that placed the payment shows, in the shape `_apply` records. Anything
-    short of a completed capture (or a created hold) of exactly the command's amount stays
-    unknown; the order id is kept so the next read can find it."""
+    short of a completed capture of exactly the command's amount stays unknown; the order id is
+    kept so the next read can find it."""
     order_id = order.get("id")
     try:
-        if capture:
-            found = capture_of(order)
-            if found.status == "COMPLETED" and found.amount_minor == command["amount_minor"]:
-                return {"orderId": order_id_of(order), "captureId": found.capture_id}
-            code = "PAYPAL_CAPTURE_UNEXPECTED"
-        else:
-            auth = authorization_of(order)
-            if auth.status == "CREATED" and auth.amount_minor == command["amount_minor"]:
-                return {
-                    "orderId": order_id_of(order),
-                    "authorizationId": auth.authorization_id,
-                    "expiresAt": auth.expires_at,
-                }
-            code = "PAYPAL_AUTHORIZATION_UNEXPECTED"
+        found = capture_of(order)
+        if found.status == "COMPLETED" and found.amount_minor == command["amount_minor"]:
+            return {"orderId": order_id_of(order), "captureId": found.capture_id}
+        code = "PAYPAL_CAPTURE_UNEXPECTED"
     except PayPalUnexpectedResponse as error:
         code = error.code
     raise OutcomePending(code, {"orderId": str(order_id)} if order_id else {})
 
 
-async def _open(
-    client: PayPalClient, command: DictRow, payment: DictRow, card: SandboxCard | None
-) -> dict[str, Any]:
-    capture = payment["intent"] == "capture"
+async def _open(client: PayPalClient, command: DictRow, card: SandboxCard | None) -> dict[str, Any]:
     if command["method"] == "checkout":
         if command["order_id"] is None:
             raise Conflict("PAYMENT_ORDER_MISSING")
-        order = await (
-            client.capture_order(command["order_id"], request_id=command["request_id"])
-            if capture
-            else client.authorize_order(command["order_id"], request_id=command["request_id"])
-        )
+        order = await client.capture_order(command["order_id"], request_id=command["request_id"])
     elif card is not None:
         order = await client.create_order(
-            intent="CAPTURE" if capture else "AUTHORIZE",
             invoice_id=command["invoice_id"],
             amount_minor=command["amount_minor"],
             request_id=command["request_id"],
@@ -101,7 +82,7 @@ async def _open(
         )
     else:
         raise Conflict("PAYMENT_CARD_REQUIRED")
-    return _placed_by(order, command, capture=capture)
+    return _placed_by(order, command)
 
 
 async def _refund(client: PayPalClient, command: DictRow) -> dict[str, Any]:
@@ -120,31 +101,10 @@ async def _refund(client: PayPalClient, command: DictRow) -> dict[str, Any]:
     return result
 
 
-async def send(
-    client: PayPalClient, command: DictRow, payment: DictRow, card: SandboxCard | None
-) -> dict[str, Any]:
-    target, key, amount = command["target_id"], command["request_id"], command["amount_minor"]
+async def send(client: PayPalClient, command: DictRow, card: SandboxCard | None) -> dict[str, Any]:
     match command["kind"]:
         case "open":
-            return await _open(client, command, payment, card)
-        case "capture":
-            capture = await client.capture(
-                target,
-                amount_minor=amount,
-                invoice_id=command["invoice_id"],
-                request_id=key,
-            )
-            if capture.amount_minor != amount:
-                raise PayPalUnexpectedResponse("PAYPAL_CAPTURE_UNEXPECTED")
-            return {"captureId": capture.capture_id, "status": capture.status}
-        case "void":
-            await client.void(target, request_id=key)
-            return {}
-        case "reauthorize":
-            auth = await client.reauthorize(target, amount_minor=amount, request_id=key)
-            if auth.status != "CREATED":
-                raise PayPalUnexpectedResponse("PAYPAL_REAUTHORIZATION_UNEXPECTED")
-            return {"authorizationId": auth.authorization_id, "expiresAt": auth.expires_at}
+            return await _open(client, command, card)
         case "refund":
             return await _refund(client, command)
         case kind:
@@ -166,9 +126,8 @@ async def execute(
         command = await commands.claim(conn, command_id, first_send=first_send)
         if command["method"] == "test_card" and card is None:
             raise Conflict("PAYMENT_CARD_REQUIRED")  # rolls the claim back
-        payment = await commands.payment(conn, command["payment_id"])
     try:
-        result = await send(client, command, payment, card)
+        result = await send(client, command, card)
     except PayPalUnknownOutcome as error:
         async with conn.transaction():
             await commands.complete(
@@ -178,11 +137,11 @@ async def execute(
                 result=error.result if isinstance(error, OutcomePending) else None,
                 error_code=error.code,
             )
-            await due.schedule(conn, "reconcile_payment", payment["id"], due_at=None)
+            await due.schedule(conn, "reconcile_payment", command["payment_id"], due_at=None)
         return "unknown"
     except PayPalError as error:
         # A refusal of the first send means no money moved. A refusal of a resend may mean
-        # the first send took effect (the request id expired, or PayPal says the hold is
+        # the first send took effect (the request id expired, or PayPal says the order is
         # already captured), so the command stays open, keeps its key and is marked; a read
         # settles it if it can, and step 8b asks the operator when it cannot.
         status: commands.Status = "unknown" if command["resend"] else "rejected"
@@ -208,9 +167,7 @@ REFUND_SETTLED: dict[str, Read] = {
 }
 
 
-async def _read_open(
-    client: PayPalClient, command: DictRow, payment: DictRow
-) -> tuple[Read, dict[str, Any] | None]:
+async def _read_open(client: PayPalClient, command: DictRow) -> tuple[Read, dict[str, Any] | None]:
     order_id = command["order_id"] or (command["result"] or {}).get("orderId")
     if order_id is None:
         return "resend", None  # PayPal never told us an order: only the key can find it
@@ -221,20 +178,20 @@ async def _read_open(
         # the key (plan step 4), and a refusal of that resend marks it for the operator
         return ("resend", None) if error.status == 404 else ("undecided", None)
     try:
-        return "succeeded", _placed_by(order, command, capture=payment["intent"] == "capture")
+        return "succeeded", _placed_by(order, command)
     except OutcomePending:
         pass
     return _not_placed(order, command), None
 
 
 def _not_placed(order: dict[str, Any], command: DictRow) -> Read:
-    """An order that shows no capture or hold as recorded."""
+    """An order that shows no capture as recorded."""
     payments = ((order.get("purchase_units") or [{}])[0].get("payments")) or {}
-    if payments.get("captures") or payments.get("authorizations"):
+    if payments.get("captures"):
         return "undecided"  # placed, but not as recorded (the amount, or still pending)
     status = order.get("status")
     if status == "APPROVED" and command["method"] == "checkout":
-        return "resend"  # the buyer approved; our capture or authorize never landed
+        return "resend"  # the buyer approved; our capture never landed
     if status in ("CREATED", "PAYER_ACTION_REQUIRED", "VOIDED"):
         # nothing placed, and nothing will be without the buyer: closing it lets the guest
         # start a new attempt (a resend would only be refused and keep the attempt open)
@@ -271,14 +228,12 @@ async def _read_refund(
 async def _read(
     client: PayPalClient, command: DictRow, payment: DictRow
 ) -> tuple[Read, dict[str, Any] | None]:
-    """Read PayPal's record of a command whose outcome we do not know. The hold kinds
-    (capture of an authorization, void, reauthorize) have no read and are resent; plan step 8c
-    removes them."""
+    """Read PayPal's record of a command whose outcome we do not know; one never sent is sent."""
     unknown = command["status"] == "unknown" or command["sent_at"] is not None
     try:
         match command["kind"]:
             case "open" if unknown:
-                read, result = await _read_open(client, command, payment)
+                read, result = await _read_open(client, command)
             case "refund" if unknown:
                 read, result = await _read_refund(client, command, payment)
             case _:
@@ -416,14 +371,12 @@ async def start_checkout(
 
     The attempt is recorded first, so the daily cap counts it before PayPal is called.
     Creating an order moves no money; an order whose attempt is replaced is never captured
-    or authorized and expires at PayPal.
+    and expires at PayPal.
     """
     async with conn.transaction():
         command = await commands.open_attempt(conn, payment_id, "checkout", daily_cap=daily_cap)
-        payment = await commands.payment(conn, payment_id)
     try:
         order = await client.create_order(
-            intent="CAPTURE" if payment["intent"] == "capture" else "AUTHORIZE",
             invoice_id=command["invoice_id"],
             amount_minor=command["amount_minor"],
             request_id=f"{command['request_id']}-order",

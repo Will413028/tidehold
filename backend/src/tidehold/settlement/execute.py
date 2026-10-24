@@ -2,7 +2,7 @@
 whole trip (plan step 8b, D18, D21). What each line does comes from `settlement.moves`: a
 refund of a captured payment is sent to PayPal, a refund of a payment not yet paid lowers
 what is due, and a credit is written once its payment is captured. Each command records the
-proposal that authorized it.
+proposal that decided it.
 
 The handler re-reads the proposal before acting (a cancellation or decision since it was
 scheduled supersedes it by state, D17), and a rerun finds the commands, waivers and credits an
@@ -44,25 +44,16 @@ async def _command(conn: Conn, payment_id: UUID, kind: str, proposal_id: UUID) -
 async def _record(
     conn: Conn, proposal: DictRow, payment_id: UUID, move: dict[str, Any], now: datetime
 ) -> DictRow | None:
-    """Store the command, or None when a concurrent run of this settlement stored it first (the
-    unique indexes keep one live command per step, and one live refund per proposal). A refund
-    refused before PayPal is stored closed, so this guest's move ends there and the others go
-    on."""
+    """Store the refund, or None when a concurrent run of this settlement stored it first (the
+    unique index keeps one live refund per proposal and payment). A refund refused before
+    PayPal is stored closed, so this guest's move ends there and the others go on."""
     try:
         async with conn.transaction():
-            if move["kind"] == "refund":
-                return await commands.record_refund(
-                    conn,
-                    payment_id,
-                    amount_minor=move["amount_minor"],
-                    now=now,
-                    proposal_id=proposal["id"],
-                )
-            return await commands.record_command(
+            return await commands.record_refund(
                 conn,
                 payment_id,
-                move["kind"],
                 amount_minor=move["amount_minor"],
+                now=now,
                 proposal_id=proposal["id"],
             )
     except (psycopg.errors.UniqueViolation, commands.RefundAlreadyRecorded):
@@ -328,10 +319,7 @@ async def _can_move(conn: Conn, proposal: DictRow, line: moves.Line) -> bool:
     captured and its refund or credit is not stored, or it is unpaid, not at PayPal, and not
     waived. A line still waiting, or a refund already handed to PayPal, does not count: the
     refund's own retries and reads finish it."""
-    try:
-        move = moves.move(line)
-    except Conflict:
-        return False  # a placed hold: its settlement fails when it runs, for the console
+    move = moves.move(line)
     if move not in _DONE:
         return False
     params = {

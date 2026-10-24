@@ -1,6 +1,7 @@
 """Evaluating a bound policy on a cancellation: code computes every amount, and anything the
 policy does not decide, or anything past the trip's mandate, asks the operator (step 8a)."""
 
+import itertools
 from typing import Any
 
 import pytest
@@ -182,6 +183,55 @@ def test_the_rest_of_a_trip_is_netted_against_what_earlier_proposals_returned() 
 
     assert _lines(evaluation, "deposit")[0]["amount_minor"] == 5000 - 1666
     assert _lines(evaluation, "balance")[0]["amount_minor"] == 20000
+
+
+def _day(day: int) -> Cancelled:
+    return Cancelled(scope="day", cause="weather", first_day=day, covered_days=1, trip_days=3)
+
+
+def _rest(day: int) -> Cancelled:
+    return Cancelled(
+        scope="rest", cause="weather", first_day=day, covered_days=4 - day, trip_days=3
+    )
+
+
+# orders in which the operator may cancel a three-day trip, each accepted in turn
+CANCELLATIONS = (
+    [_rest(1)],
+    [_day(2), _rest(1)],
+    [_day(1), _day(2), _rest(3)],
+    [_day(3), _day(3), _rest(2), _rest(1)],
+)
+
+
+def test_settlement_conserves_money_for_every_small_case() -> None:
+    """Ported from dive-trip-agent@8065eba (`settle_diver`), now on the code that computes the
+    amounts: whatever the trip's settlements return on one guest's payment is never negative
+    and never more than the guest owes on it, and a full refund of the whole trip returns all
+    of it."""
+    remedies = (
+        _remedy("refund", 100),
+        _remedy("refund", 50),
+        _remedy("credit", 33),
+        _remedy(
+            "refund",
+            100,
+            deductions=[{"kind": "percent", "value": 3.5, "label": "fee", "quote": "q"}],
+        ),
+    )
+    for base, remedy, cancellations in itertools.product(
+        (0, 1, 999, 10000, 30005), remedies, CANCELLATIONS
+    ):
+        rule = RuleIn(_rule(remedies=[remedy]))
+        returned = 0
+        for cancelled in cancellations:
+            guest = GuestMoney("g", base, base, returned={"deposit": returned, "balance": returned})
+            [line] = _lines(evaluate([rule], cancelled, [guest]), "deposit")
+            assert line["amount_minor"] >= 0
+            returned += line["amount_minor"]
+            assert returned <= base
+        if remedy == remedies[0] and cancellations == CANCELLATIONS[0]:
+            assert returned == base
 
 
 def test_a_payment_that_owes_nothing_returns_nothing() -> None:

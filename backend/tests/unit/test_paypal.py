@@ -35,7 +35,7 @@ async def test_the_client_talks_only_to_the_sandbox() -> None:
     seen: list[httpx.Request] = []
     client = _client(httpx.Response(204), seen)
 
-    await client.void("A1", request_id="tidehold-void-1")
+    await client.capture_order("O1", request_id="tidehold-open-1")
 
     assert client.base_url == SANDBOX_API
     assert {r.url.host for r in seen} == {"api-m.sandbox.paypal.com"}
@@ -73,16 +73,16 @@ async def test_an_outage_or_timeout_is_an_unknown_outcome(
     client = _client(answer, [])
 
     with pytest.raises(PayPalUnknownOutcome):
-        await client.void("A1", request_id="tidehold-void-1")
+        await client.capture_order("O1", request_id="tidehold-open-1")
     await client.aclose()
 
 
 async def test_a_refusal_names_paypals_issue() -> None:
-    body = {"name": "UNPROCESSABLE_ENTITY", "details": [{"issue": "AUTHORIZATION_VOIDED"}]}
+    body = {"name": "UNPROCESSABLE_ENTITY", "details": [{"issue": "ORDER_NOT_APPROVED"}]}
     client = _client(httpx.Response(422, json=body), [])
 
-    with pytest.raises(PayPalError, match="PAYPAL_AUTHORIZATION_VOIDED"):
-        await client.void("A1", request_id="tidehold-void-1")
+    with pytest.raises(PayPalError, match="PAYPAL_ORDER_NOT_APPROVED"):
+        await client.capture_order("O1", request_id="tidehold-open-1")
     await client.aclose()
 
 
@@ -111,16 +111,16 @@ async def test_a_token_paypal_no_longer_accepts_is_replaced_and_the_request_sent
     seen: list[httpx.Request] = []
     client = _tokens_then([EXPIRED, httpx.Response(204)], seen)
 
-    await client.void("A1", request_id="tidehold-void-1")
+    await client.capture_order("O1", request_id="tidehold-open-1")
 
     sent = [r for r in seen if r.url.path != "/v1/oauth2/token"]
     assert [r.headers["Authorization"] for r in sent] == ["Bearer t1", "Bearer t2"]
-    assert {r.headers["PayPal-Request-Id"] for r in sent} == {"tidehold-void-1"}
+    assert {r.headers["PayPal-Request-Id"] for r in sent} == {"tidehold-open-1"}
 
     seen.clear()
     still = _tokens_then([EXPIRED, EXPIRED], seen)
     with pytest.raises(PayPalError) as refused:
-        await still.void("A1", request_id="tidehold-void-1")
+        await still.capture_order("O1", request_id="tidehold-open-1")
     assert refused.value.status == 401
     assert len([r for r in seen if r.url.path != "/v1/oauth2/token"]) == 2
     await client.aclose()
@@ -135,10 +135,10 @@ async def test_a_token_expires_by_the_wall_clock_so_a_sleeping_host_does_not_reu
     client = _tokens_then([httpx.Response(204), httpx.Response(204)], seen)
     now = time.time()
     monkeypatch.setattr(time, "time", lambda: now)
-    await client.void("A1", request_id="tidehold-void-1")
+    await client.capture_order("O1", request_id="tidehold-open-1")
 
     monkeypatch.setattr(time, "time", lambda: now + 3600)
-    await client.void("A1", request_id="tidehold-void-2")
+    await client.capture_order("O1", request_id="tidehold-open-2")
 
     sent = [r for r in seen if r.url.path != "/v1/oauth2/token"]
     assert [r.headers["Authorization"] for r in sent] == ["Bearer t1", "Bearer t2"]

@@ -20,8 +20,8 @@ make dev-backend    # migrate, then the API on :8000
 make dev-web        # Next.js on :3000, proxying /api to the backend
 ```
 
-The backend reads `DATABASE_URL` and `PUBLIC_ORIGIN` (the web origin; state-changing requests from any other origin are refused, and the session cookie is `Secure` when it is `https`). PayPal commands use sandbox credentials from `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET`, loaded only when `PAYPAL_ENV=sandbox`; the client is pinned to `api-m.sandbox.paypal.com`. `python -m tidehold.bootstrap.sandbox` runs the sandbox smoke and the reauthorization check (see its docstring).
+The backend reads `DATABASE_URL` and `PUBLIC_ORIGIN` (the web origin; state-changing requests from any other origin are refused, and the session cookie is `Secure` when it is `https`). PayPal commands use sandbox credentials from `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET`, loaded only when `PAYPAL_ENV=sandbox`; the client is pinned to `api-m.sandbox.paypal.com`. `python -m tidehold.bootstrap.sandbox` runs the sandbox smoke (see its docstring).
 
 ## Origin
 
-The PayPal money engine (stored-before-sent commands with `PayPal-Request-Id`, reconciliation of unknown outcomes, the replace-or-send race guard) and the HTTP boundary are ported from the same developer's [dive-trip-agent](https://github.com/Will413028/dive-trip-agent) at commit `8065eba` (branch `feat/paypal-deposits`), its PayPal group-deposits demo, and re-evaluated for tidehold: payments instead of bookings and divers, CAPTURE orders for the deposit and reauthorization for the balance hold.
+The PayPal money engine (stored-before-sent commands with `PayPal-Request-Id`, reconciliation of unknown outcomes, the replace-or-send race guard) and the HTTP boundary are ported from the same developer's [dive-trip-agent](https://github.com/Will413028/dive-trip-agent) at commit `8065eba` (branch `feat/paypal-deposits`), its PayPal group-deposits demo, and re-evaluated for tidehold: payments instead of bookings and divers, CAPTURE orders for the deposit and the balance, refunds instead of voids.

@@ -18,7 +18,7 @@ class FakePayPal:
         self.refunds: dict[str, dict[str, Any]] = {}
         self.calls: list[str] = []
         # Knobs a test turns to reproduce PayPal's failure modes.
-        self.card_status = "CREATED"
+        self.capture_status = "COMPLETED"  # the status of each capture PayPal makes
         self.refund_status = "COMPLETED"
         # path suffixes whose first call takes effect but its answer is lost (a timeout) ...
         self.time_out_first: set[str] = set()
@@ -89,23 +89,12 @@ class FakePayPal:
         if path == "/v2/checkout/orders":
             return self._create(key, body)
         action = path.rsplit("/", 1)[-1]
-        if path.startswith("/v2/checkout/orders/"):
+        if path.startswith("/v2/checkout/orders/") and action == "capture":
             order = self.orders[path.split("/")[-2]]
-            if action == "capture":
-                return httpx.Response(201, json=self._capture(order, order["amount"]))
-            return httpx.Response(201, json=self._place(order, "authorizations", self._auth(order)))
+            return httpx.Response(201, json=self._capture(order, order["amount"]))
         if path.startswith("/v2/payments/captures/") and action == "refund":
             return self._refund(path.split("/")[-2], body)
-        return self._payment_action(action, body)
-
-    def _payment_action(self, action: str, body: dict[str, Any]) -> httpx.Response:
-        answers = {
-            "capture": lambda: httpx.Response(201, json=_capture(body["amount"])),
-            "void": lambda: httpx.Response(204),
-            "reauthorize": lambda: httpx.Response(201, json=self._auth({"amount": body["amount"]})),
-        }
-        answer = answers.get(action)
-        return answer() if answer else httpx.Response(404, json={"name": "RESOURCE_NOT_FOUND"})
+        return httpx.Response(404, json={"name": "RESOURCE_NOT_FOUND"})
 
     def _refund(self, capture_id: str, body: dict[str, Any]) -> httpx.Response:
         refund = {
@@ -134,30 +123,20 @@ class FakePayPal:
         if "card" not in body.get("payment_source", {}):
             links = [{"rel": "payer-action", "href": f"https://sandbox.example/{order['id']}"}]
             return httpx.Response(201, json={**order, "links": links})
-        if body["intent"] == "CAPTURE":
-            return httpx.Response(201, json=self._capture(order, unit["amount"]))
-        return httpx.Response(201, json=self._place(order, "authorizations", self._auth(order)))
+        return httpx.Response(201, json=self._capture(order, unit["amount"]))
 
     def _capture(self, order: dict[str, Any], amount: dict[str, str]) -> dict[str, Any]:
-        capture = _capture(amount)
+        capture: dict[str, Any] = {
+            "id": f"C{uuid4().hex[:15].upper()}",
+            "status": self.capture_status,
+            "amount": amount,
+        }
         self.captures[capture["id"]] = {**capture, "order": order}
-        return self._place(order, "captures", capture)
+        return self._place(order, capture)
 
-    def _place(self, order: dict[str, Any], kind: str, payment: dict[str, Any]) -> dict[str, Any]:
-        """The order as PayPal shows it after placing a capture or a hold (kept for reads)."""
+    def _place(self, order: dict[str, Any], capture: dict[str, Any]) -> dict[str, Any]:
+        """The order as PayPal shows it after placing a capture (kept for reads)."""
         order["status"] = "COMPLETED"
-        order["purchase_units"][0]["payments"].setdefault(kind, []).append(payment)
+        order["purchase_units"][0]["payments"].setdefault("captures", []).append(capture)
         shown: dict[str, Any] = json.loads(json.dumps(order))
         return shown
-
-    def _auth(self, order: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "id": f"A{uuid4().hex[:15].upper()}",
-            "status": self.card_status,
-            "amount": order["amount"],
-            "expiration_time": "2026-12-31T00:00:00Z",
-        }
-
-
-def _capture(amount: dict[str, str]) -> dict[str, Any]:
-    return {"id": f"C{uuid4().hex[:15].upper()}", "status": "COMPLETED", "amount": amount}

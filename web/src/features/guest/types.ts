@@ -1,5 +1,5 @@
 export type PaymentView = {
-  state: "pending" | "authorized" | "captured" | "voided";
+  state: "pending" | "captured";
   amount_minor: number;
   /** what is still to pay: the amount less what settlements took off it before it was paid */
   due_minor: number;

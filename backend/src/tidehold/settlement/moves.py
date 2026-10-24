@@ -24,6 +24,7 @@ from tidehold.platform.errors import Conflict
 from tidehold.settlement.evaluate import PURPOSES, Purpose
 
 Move = Literal["refund", "waive", "credit", "wait", "none"]
+State = Literal["pending", "captured"]
 
 
 @dataclass(frozen=True)
@@ -42,8 +43,9 @@ class Line:
         return payment_id
 
     @property
-    def state(self) -> str:
-        return str(self.guest[f"{self.purpose}_state"])
+    def state(self) -> State:
+        state: State = self.guest[f"{self.purpose}_state"]
+        return state
 
 
 def lines(proposal: Mapping[str, Any], guests: list[DictRow]) -> Iterator[Line]:
@@ -75,9 +77,6 @@ def move(line: Line) -> Move:
             return "refund" if line.kind == "refund" else "credit"
         case "pending":
             return "waive" if line.kind == "refund" else "wait"
-        case _:
-            # a placed hold (development data until plan step 8c): never settled silently
-            raise Conflict("PAYMENT_HELD")
 
 
 async def waived(conn: Conn, proposal: Mapping[str, Any], line: Line) -> bool:

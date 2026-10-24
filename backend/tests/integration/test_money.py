@@ -5,6 +5,7 @@ keyed by payment instead of booking and diver.
 """
 
 import asyncio
+import typing
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -15,7 +16,7 @@ from psycopg.rows import DictRow
 from tests.integration.fake_paypal import FakePayPal
 from tidehold.identity.sessions import new_workspace
 from tidehold.money import commands, service
-from tidehold.money.commands import Intent, Purpose
+from tidehold.money.commands import Purpose
 from tidehold.money.paypal import TEST_CARD, PayPalClient, PayPalUnknownOutcome, SandboxCard
 from tidehold.platform import due_actions as due
 from tidehold.platform.db import Conn, connect
@@ -34,14 +35,9 @@ async def _payment(
     purpose: Purpose = "balance",
     amount: int = 30000,
     workspace: UUID | None = None,
-    intent: Intent | None = None,
 ) -> UUID:
     return await commands.create_payment(
-        conn,
-        workspace_id=workspace or await _workspace(conn),
-        purpose=purpose,
-        intent=intent or ("capture" if purpose == "deposit" else "authorize"),
-        amount_minor=amount,
+        conn, workspace_id=workspace or await _workspace(conn), purpose=purpose, amount_minor=amount
     )
 
 
@@ -72,20 +68,6 @@ async def _command(conn: Conn, command_id: UUID) -> dict[str, object]:
     return dict(row)
 
 
-async def test_a_balance_is_held_then_partially_captured_once(conn: Conn) -> None:
-    fake = FakePayPal()
-    payment_id = await _paid(conn, fake)
-    async with conn.transaction():
-        command = await commands.record_command(conn, payment_id, "capture", amount_minor=20000)
-
-    outcome = await service.execute(conn, fake.client(), command["id"])
-
-    row = await _payment_row(conn, payment_id)
-    assert outcome == "succeeded"
-    assert (row["state"], row["captured_minor"]) == ("captured", 20000)
-    assert command["target_id"] == (await _command(conn, command["id"]))["target_id"]
-
-
 async def test_a_deposit_is_captured_then_refunded(conn: Conn) -> None:
     fake = FakePayPal()
     payment_id = await _paid(conn, fake, "deposit")
@@ -98,19 +80,30 @@ async def test_a_deposit_is_captured_then_refunded(conn: Conn) -> None:
     assert command["target_id"] == row["capture_id"]
 
 
+async def _second_open(conn: Conn, payment_id: UUID) -> None:
+    """Insert an open attempt past `open_attempt`'s own check, as a racing writer would."""
+    await conn.execute(
+        "insert into money_commands (id, payment_id, kind, method, amount_minor, request_id,"
+        " invoice_id, status) values (gen_random_uuid(), %s, 'open', 'test_card', 100,"
+        " 'tidehold-open-' || gen_random_uuid(), 'tidehold-' || gen_random_uuid(), 'pending')",
+        (payment_id,),
+    )
+
+
 async def test_a_second_live_command_of_the_same_kind_is_refused(conn: Conn) -> None:
     fake = FakePayPal()
-    payment_id = await _paid(conn, fake)
+    payment_id = await _payment(conn)
     async with conn.transaction():
-        await commands.record_command(conn, payment_id, "void", amount_minor=0)
+        attempt = await commands.open_attempt(conn, payment_id, "test_card", daily_cap=CAP)
+    await commands.claim(conn, attempt["id"])
 
+    with pytest.raises(Conflict, match="PAYMENT_ATTEMPT_IN_FLIGHT"):
+        async with conn.transaction():
+            await commands.open_attempt(conn, payment_id, "checkout", daily_cap=CAP)
+    # the database refuses it too: one live open attempt per payment
     with pytest.raises(psycopg.errors.UniqueViolation):
         async with conn.transaction():
-            await commands.record_command(conn, payment_id, "void", amount_minor=0)
-    # A capture closes the same hold, so it is refused too: money moves once (D11).
-    with pytest.raises(psycopg.errors.UniqueViolation):
-        async with conn.transaction():
-            await commands.record_command(conn, payment_id, "capture", amount_minor=100)
+            await _second_open(conn, payment_id)
     # Refunds may be several (D18), but never above what the payment captured.
     deposit = await _paid(conn, fake, "deposit")
     with pytest.raises(Conflict, match="REFUND_EXCEEDS_CAPTURED"):
@@ -119,23 +112,23 @@ async def test_a_second_live_command_of_the_same_kind_is_refused(conn: Conn) -> 
 
 async def test_an_unknown_capture_is_reconciled_with_the_same_request_id(conn: Conn) -> None:
     fake = FakePayPal()
-    payment_id = await _paid(conn, fake)
-    fake.time_out_first.add("capture")
-    async with conn.transaction():
-        command = await commands.record_command(conn, payment_id, "capture", amount_minor=30000)
+    payment_id = await _payment(conn)
+    fake.time_out_first.add("orders")  # the card capture takes effect, its answer is lost
 
-    first = await service.execute(conn, fake.client(), command["id"])
-    second = await service.reconcile(conn, fake.client(), payment_id)
+    with pytest.raises(PayPalUnknownOutcome):
+        await service.pay_with_test_card(conn, fake.client(), payment_id, TEST_CARD, daily_cap=CAP)
+    [command_id] = await commands.open_commands(conn, payment_id)
+    second = await service.reconcile(conn, fake.client(), payment_id, TEST_CARD)
 
-    assert first == "unknown"
-    assert second == {command["id"]: "succeeded"}
-    assert fake.moved("-" + str(command["id"])) == 1
+    assert second == {command_id: "succeeded"}
+    assert fake.moved("-" + str(command_id)) == 1
+    assert fake.posts("/orders") == 2  # the lost send and its resend under the same key
     assert (await _payment_row(conn, payment_id))["state"] == "captured"
 
 
 async def test_an_unexpected_paypal_answer_keeps_the_attempt_open(conn: Conn) -> None:
     fake = FakePayPal()
-    fake.card_status = "PENDING"
+    fake.capture_status = "PENDING"
     payment_id = await _payment(conn)
 
     with pytest.raises(PayPalUnknownOutcome):
@@ -145,7 +138,7 @@ async def test_an_unexpected_paypal_answer_keeps_the_attempt_open(conn: Conn) ->
     command = await _command(conn, command_id)
     assert (command["status"], command["error_code"]) == (
         "unknown",
-        "PAYPAL_AUTHORIZATION_UNEXPECTED",
+        "PAYPAL_CAPTURE_UNEXPECTED",
     )
     with pytest.raises(Conflict, match="PAYMENT_ATTEMPT_IN_FLIGHT"):
         await service.pay_with_test_card(conn, fake.client(), payment_id, TEST_CARD, daily_cap=CAP)
@@ -191,18 +184,6 @@ async def test_a_replacement_and_a_send_never_both_win(conn: Conn, database_url:
     assert (await _command(conn, card_attempt))["status"] == "pending"
 
 
-async def test_a_checkout_the_buyer_approves_places_the_hold(conn: Conn) -> None:
-    fake = FakePayPal()
-    payment_id = await _payment(conn)
-
-    order_id = await service.start_checkout(conn, fake.client(), payment_id, daily_cap=CAP)
-    await service.complete_checkout(conn, fake.client(), payment_id, order_id)
-
-    row = await _payment_row(conn, payment_id)
-    assert row["state"] == "authorized"
-    assert row["authorization_id"]
-
-
 async def test_an_abandoned_checkout_is_replaced_by_a_new_attempt(conn: Conn) -> None:
     fake = FakePayPal()
     payment_id = await _payment(conn, "deposit")
@@ -225,39 +206,22 @@ async def test_a_refused_card_closes_the_attempt_and_the_guest_can_retry(conn: C
     fake.refuse.clear()
     await service.pay_with_test_card(conn, fake.client(), payment_id, TEST_CARD, daily_cap=CAP)
 
-    assert (await _payment_row(conn, payment_id))["state"] == "authorized"
+    assert (await _payment_row(conn, payment_id))["state"] == "captured"
 
 
-async def test_a_reauthorization_replaces_the_hold_the_capture_targets(conn: Conn) -> None:
-    fake = FakePayPal()
-    payment_id = await _paid(conn, fake)
-    original = (await _payment_row(conn, payment_id))["authorization_id"]
-    async with conn.transaction():
-        reauth = await commands.record_command(conn, payment_id, "reauthorize", amount_minor=30000)
-    await service.execute(conn, fake.client(), reauth["id"])
-
-    async with conn.transaction():
-        capture = await commands.record_command(conn, payment_id, "capture", amount_minor=30000)
-
-    renewed = (await _payment_row(conn, payment_id))["authorization_id"]
-    assert reauth["target_id"] == original
-    assert capture["target_id"] == renewed != original
-
-
-async def test_the_daily_cap_stops_new_payments_but_never_a_release(conn: Conn) -> None:
+async def test_the_daily_cap_stops_new_payments_but_never_a_refund(conn: Conn) -> None:
     fake = FakePayPal()
     workspace = await _workspace(conn)
-    held = await _payment(conn, workspace=workspace)
-    await service.pay_with_test_card(conn, fake.client(), held, TEST_CARD, daily_cap=2)
+    paid = await _payment(conn, workspace=workspace)
+    await service.pay_with_test_card(conn, fake.client(), paid, TEST_CARD, daily_cap=2)
     second = await _payment(conn, workspace=workspace)
     await service.pay_with_test_card(conn, fake.client(), second, TEST_CARD, daily_cap=2)
     third = await _payment(conn, workspace=workspace)
 
     with pytest.raises(LimitReached, match="PAYPAL_DAILY_CAP_REACHED"):
         await service.pay_with_test_card(conn, fake.client(), third, TEST_CARD, daily_cap=2)
-    async with conn.transaction():
-        void = await commands.record_command(conn, held, "void", amount_minor=0)
-    assert await service.execute(conn, fake.client(), void["id"]) == "succeeded"
+    refund = await _refund(conn, paid, 1000)
+    assert await service.execute(conn, fake.client(), refund["id"]) == "succeeded"
     # Another workspace has its own allowance.
     elsewhere = await _payment(conn)
     await service.pay_with_test_card(conn, fake.client(), elsewhere, TEST_CARD, daily_cap=2)
@@ -297,29 +261,6 @@ async def test_a_refused_resend_keeps_the_command_open_and_its_key(conn: Conn) -
     # it still counts against the capture
     with pytest.raises(Conflict, match="REFUND_EXCEEDS_CAPTURED"):
         await _refund(conn, payment_id, 25001)
-
-
-async def test_a_refused_resend_of_a_hold_capture_is_marked_and_not_sent_again(conn: Conn) -> None:
-    """A hold has no read (plan step 8c removes holds): its capture is resent once, and a
-    refusal leaves it open, keyed and marked, never sent a third time."""
-    fake = FakePayPal()
-    payment_id = await _paid(conn, fake)
-    fake.time_out_first.add("capture")
-    async with conn.transaction():
-        command = await commands.record_command(conn, payment_id, "capture", amount_minor=30000)
-    await service.execute(conn, fake.client(), command["id"])
-    fake.refuse.add("capture")
-
-    first = await service.reconcile(conn, fake.client(), payment_id)
-    again = await service.reconcile(conn, fake.client(), payment_id)
-
-    row = await _command(conn, command["id"])
-    assert (first, again) == ({command["id"]: "unknown"}, {command["id"]: "held"})
-    assert (row["error_code"], row["resend_refused_at"] is not None) == ("PAYPAL_DECLINED", True)
-    assert fake.posts("/capture") == 2
-    with pytest.raises(psycopg.errors.UniqueViolation):
-        async with conn.transaction():
-            await commands.record_command(conn, payment_id, "void", amount_minor=0)
 
 
 async def test_a_refused_resend_is_read_before_any_ask(conn: Conn) -> None:
@@ -605,11 +546,11 @@ async def test_a_test_card_payment_keeps_its_order_id(conn: Conn) -> None:
     assert command["order_id"] is not None
     assert (await _payment_row(conn, payment_id))["order_id"] == command["order_id"]
     # an answer we cannot record still names its order, so the read can find it
-    fake.card_status = "PENDING"
-    held = await _payment(conn)
+    fake.capture_status = "PENDING"
+    pending = await _payment(conn)
     with pytest.raises(PayPalUnknownOutcome):
-        await service.pay_with_test_card(conn, fake.client(), held, TEST_CARD, daily_cap=CAP)
-    [unknown] = await commands.open_commands(conn, held)
+        await service.pay_with_test_card(conn, fake.client(), pending, TEST_CARD, daily_cap=CAP)
+    [unknown] = await commands.open_commands(conn, pending)
     assert (await _command(conn, unknown))["order_id"] in fake.orders
 
 
@@ -625,18 +566,30 @@ async def test_a_refund_past_the_window_is_refused_before_paypal_is_called(conn:
     await _refund(conn, payment_id, 1000, now=captured_at + timedelta(days=180))
 
 
-async def test_a_hold_is_reauthorized_again_but_one_at_a_time(conn: Conn) -> None:
-    fake = FakePayPal()
-    payment_id = await _paid(conn, fake)
-    for _ in range(2):
-        async with conn.transaction():
-            reauth = await commands.record_command(
-                conn, payment_id, "reauthorize", amount_minor=30000
-            )
-        assert await service.execute(conn, fake.client(), reauth["id"]) == "succeeded"
-    async with conn.transaction():
-        await commands.record_command(conn, payment_id, "reauthorize", amount_minor=30000)
+async def test_the_command_kinds_are_open_and_refund(conn: Conn) -> None:
+    """A payment is opened as a capture and money goes back only as refunds (D18, plan step
+    8c): no hold kind is left in the code or allowed by the database."""
+    assert typing.get_args(commands.Kind) == ("open", "refund")
+    payment_id = await _paid(conn, FakePayPal(), "deposit")
+    for kind in ("capture", "void", "reauthorize"):
+        with pytest.raises(psycopg.errors.CheckViolation):
+            async with conn.transaction():
+                await conn.execute(
+                    "insert into money_commands (id, payment_id, kind, target_id, amount_minor,"
+                    " request_id, invoice_id, status) values (gen_random_uuid(), %s, %s, 'A1',"
+                    " 100, 'tidehold-' || gen_random_uuid(), 'tidehold-' || gen_random_uuid(),"
+                    " 'pending')",
+                    (payment_id, kind),
+                )
 
-    with pytest.raises(psycopg.errors.UniqueViolation):
+
+async def test_the_database_refuses_refunds_above_the_capture(conn: Conn) -> None:
+    """The refund bound holds in the database too, not only in `record_refund` (D18)."""
+    payment_id = await _paid(conn, FakePayPal(), "deposit")
+
+    with pytest.raises(psycopg.errors.CheckViolation, match="payments_check"):
         async with conn.transaction():
-            await commands.record_command(conn, payment_id, "reauthorize", amount_minor=30000)
+            await conn.execute(
+                "update payments set refunded_minor = captured_minor + 1 where id = %s",
+                (payment_id,),
+            )

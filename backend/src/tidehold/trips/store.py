@@ -206,14 +206,12 @@ async def invite(conn: Conn, workspace_id: UUID, trip_id: UUID, name: str) -> UU
             conn,
             workspace_id=workspace_id,
             purpose="deposit",
-            intent="capture",
             amount_minor=row["deposit_minor"],
         )
         balance = await commands.create_payment(
             conn,
             workspace_id=workspace_id,
             purpose="balance",
-            intent="capture",
             amount_minor=row["balance_minor"],
         )
         guest = await insert_returning(

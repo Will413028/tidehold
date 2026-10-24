@@ -29,16 +29,12 @@ async def _invite(operator: AsyncClient, trip: dict[str, Any], name: str = "Ana"
 
 
 async def test_a_guest_gets_its_balance_payment_at_invitation(
-    operator: AsyncClient, client: AsyncClient, conn: Conn
+    operator: AsyncClient, client: AsyncClient
 ) -> None:
     starts_on = datetime.now(ZoneInfo("Asia/Manila")).date() + timedelta(days=60)
     token = await _invite(operator, trip_starting(starts_on))
 
     balance = (await client.get(f"/api/guest/{token}")).json()["balance"]
-    guest = await store.guest_by_token(conn, token)
-    row = await (
-        await conn.execute("select intent from payments where id = %s", (guest["balance_id"],))
-    ).fetchone()
 
     # due 30 days before the first trip day, a local date in Asia/Manila
     assert balance == {
@@ -52,8 +48,6 @@ async def test_a_guest_gets_its_balance_payment_at_invitation(
             "refunded_minor": 0,
         },
     }
-    assert row is not None
-    assert row["intent"] == "capture"
 
 
 async def test_the_balance_is_captured_when_the_guest_pays(

@@ -17,27 +17,11 @@ from tidehold.platform.db import Conn, insert_returning
 from tidehold.platform.errors import Conflict, LimitReached, NotFound
 
 Purpose = Literal["deposit", "balance"]
-# What the payment's order asks PayPal for (D18): a capture at once, or (until plan step 8c) a
-# hold on a balance created before D18.
-Intent = Literal["capture", "authorize"]
-Kind = Literal["open", "capture", "void", "reauthorize", "refund"]
+# `open` places a payment as a captured CAPTURE order; `refund` returns part of a capture (D18).
+Kind = Literal["open", "refund"]
 Method = Literal["checkout", "test_card"]
 Status = Literal["succeeded", "rejected", "unknown"]
 
-# What each kind acts on, read from the payment when the command is recorded.
-TARGET_OF: dict[Kind, str] = {
-    "capture": "authorization_id",
-    "void": "authorization_id",
-    "reauthorize": "authorization_id",
-    "refund": "capture_id",
-}
-# The payment state each hold command needs; a refund needs a captured payment of either
-# purpose (D18, `record_refund`).
-NEEDS_STATE: dict[Kind, tuple[Purpose, str]] = {
-    "capture": ("balance", "authorized"),
-    "void": ("balance", "authorized"),
-    "reauthorize": ("balance", "authorized"),
-}
 # PayPal accepts a refund within 180 days of the capture (Checkout refunds, read 2026-10-23;
 # D20). Counted from when the capture was first sent, which is never after PayPal's own time.
 REFUND_WINDOW = timedelta(days=180)
@@ -59,13 +43,13 @@ async def append(conn: Conn, payment_id: UUID, kind: str, detail: dict[str, Any]
 
 
 async def create_payment(
-    conn: Conn, *, workspace_id: UUID, purpose: Purpose, intent: Intent, amount_minor: int
+    conn: Conn, *, workspace_id: UUID, purpose: Purpose, amount_minor: int
 ) -> UUID:
     row = await insert_returning(
         conn,
-        "insert into payments (workspace_id, purpose, intent, amount_minor)"
-        " values (%s, %s, %s, %s) returning id",
-        (workspace_id, purpose, intent, amount_minor),
+        "insert into payments (workspace_id, purpose, amount_minor) values (%s, %s, %s)"
+        " returning id",
+        (workspace_id, purpose, amount_minor),
     )
     payment_id: UUID = row["id"]
     await append(conn, payment_id, "payment_created", {"purpose": purpose, "amount": amount_minor})
@@ -135,7 +119,7 @@ async def open_attempt(conn: Conn, payment_id: UUID, method: Method, *, daily_ca
     """Record a new attempt to place a payment, inside the caller's transaction.
 
     A checkout the buyer never finished is replaced: PayPal may still show its order as
-    approved, but only our capture or authorize call moves money, and that call now finds
+    approved, but only our capture call moves money, and that call now finds
     the attempt closed. An attempt already sent to PayPal blocks until it settles.
     """
     current = await payment(conn, payment_id, lock=True)
@@ -181,15 +165,12 @@ async def waive(conn: Conn, payment_id: UUID, *, amount_minor: int, proposal_id:
     8b), under the payment's row lock. Unsent attempts are closed first: their orders were
     created for the old amount, and the update locks each attempt's row, so a concurrent `claim`
     either sent it already (the attempt is in flight and nothing is waived) or finds it closed.
-    Refused above what is still due (`WAIVER_EXCEEDS_DUE`) and on a placed hold (`PAYMENT_HELD`,
-    development data until step 8c)."""
+    Refused above what is still due (`WAIVER_EXCEEDS_DUE`)."""
     if amount_minor <= 0:
         raise ValueError("a waiver lowers a positive amount")
     current = await payment(conn, payment_id, lock=True)
     if current["state"] == "captured":
         return "captured"
-    if current["state"] != "pending":
-        raise Conflict("PAYMENT_HELD")
     if await (
         await conn.execute(
             "select 1 from payment_waivers where proposal_id = %s and payment_id = %s",
@@ -281,35 +262,6 @@ async def _check_refund(conn: Conn, current: DictRow, amount_minor: int, now: da
         raise Conflict("REFUND_EXCEEDS_CAPTURED")
 
 
-async def record_command(
-    conn: Conn,
-    payment_id: UUID,
-    kind: Kind,
-    *,
-    amount_minor: int,
-    proposal_id: UUID | None = None,
-) -> DictRow:
-    """Record a follow-up command against what the payment placed, with the proposal that
-    authorized it (step 8); the unique index refuses a second live command of the same step.
-    A refund goes through `record_refund`, which needs the time for its window."""
-    if kind in ("open", "refund"):
-        raise ValueError(f"use {'open_attempt' if kind == 'open' else 'record_refund'}")
-    current = await payment(conn, payment_id)
-    purpose, state = NEEDS_STATE[kind]
-    if (current["purpose"], current["state"]) != (purpose, state):
-        raise Conflict(f"PAYMENT_NOT_{state.upper()}")
-    return await _insert(
-        conn,
-        NewCommand(
-            payment_id,
-            kind,
-            amount_minor,
-            target_id=current[TARGET_OF[kind]],
-            proposal_id=proposal_id,
-        ),
-    )
-
-
 class RefundAlreadyRecorded(Conflict):
     """This settlement already has a live refund of this payment."""
 
@@ -336,14 +288,13 @@ async def record_refund(
         # another run of the same settlement got the lock first; the unique index backs this
         raise RefundAlreadyRecorded("REFUND_ALREADY_RECORDED")
     await _check_refund(conn, current, amount_minor, now)
-    kind: Kind = "refund"
     return await _insert(
         conn,
         NewCommand(
             payment_id,
-            kind,
+            "refund",
             amount_minor,
-            target_id=current[TARGET_OF[kind]],
+            target_id=current["capture_id"],
             proposal_id=proposal_id,
         ),
     )
@@ -519,32 +470,12 @@ async def complete(
 async def _apply(conn: Conn, command: DictRow, result: dict[str, Any]) -> None:
     payment_id, amount = command["payment_id"], command["amount_minor"]
     match command["kind"]:
-        case "open" if "captureId" in result:
+        case "open":
             await conn.execute(
                 "update payments set state = 'captured', capture_id = %s, captured_minor = %s,"
                 " captured_at = %s, order_id = %s where id = %s",
                 (result["captureId"], amount, command["sent_at"], result["orderId"], payment_id),
             )
-        case "open":
-            await conn.execute(
-                "update payments set state = 'authorized', authorization_id = %s,"
-                " authorization_expires_at = %s, order_id = %s where id = %s",
-                (result["authorizationId"], result.get("expiresAt"), result["orderId"], payment_id),
-            )
-        case "reauthorize":
-            await conn.execute(
-                "update payments set state = 'authorized', authorization_id = %s,"
-                " authorization_expires_at = %s where id = %s",
-                (result["authorizationId"], result.get("expiresAt"), payment_id),
-            )
-        case "capture":
-            await conn.execute(
-                "update payments set state = 'captured', capture_id = %s, captured_minor = %s,"
-                " captured_at = %s where id = %s",
-                (result["captureId"], amount, command["sent_at"], payment_id),
-            )
-        case "void":
-            await conn.execute("update payments set state = 'voided' where id = %s", (payment_id,))
         case "refund":
             await conn.execute(
                 "update payments set refunded_minor = refunded_minor + %s where id = %s",
