@@ -116,9 +116,15 @@ test("the operator replays a recorded gale, cancels the day and decides the sett
   await page.goto(link ?? "");
   const cancellations = page.getByRole("region", { name: "Cancellations" });
   await expect(cancellations).toContainText("The operator cancelled day 1 for weather.");
-  await expect(cancellations.getByRole("list", { name: "Your outcome" })).toContainText(
-    "Your deposit: USD 25.00 refunded",
-  );
+  // the deposit's refund is sent by the worker a few seconds after the decision, and the unpaid
+  // balance's day is taken off what is due at once (step 8b)
+  await expect(async () => {
+    await page.reload();
+    await expect(cancellations.getByRole("list", { name: "Your outcome" }).getByRole("listitem")).toHaveText(
+      ["Your deposit: USD 25.00 refunded", "Your balance: USD 150.00 taken off what you owe"],
+      { timeout: 1000 },
+    );
+  }).toPass({ timeout: 30000 });
   await expect(cancellations.getByRole("list", { name: "Official warnings in force" })).toContainText(
     /Gale Warning \(NWS\).*recorded at .* UTC, replayed/,
   );

@@ -116,10 +116,15 @@ test("the demo path: compile, trip, guests pay, a recorded gale, the operator's 
   await expect(cancellations).toContainText(
     "The operator cancelled day 1 for weather. Gale Warning (NWS) was in force.",
   );
-  await expect(cancellations.getByRole("list", { name: "Your outcome" }).getByRole("listitem")).toHaveText([
-    "Your deposit: USD 25.00 refunded",
-    "Your balance: USD 150.00 refunded",
-  ]);
+  // the worker sends both refunds a few seconds after the decision (step 8b): "refund in
+  // progress" until then, so the page is reloaded until PayPal has completed them
+  await expect(async () => {
+    await page.reload();
+    await expect(cancellations.getByRole("list", { name: "Your outcome" }).getByRole("listitem")).toHaveText(
+      ["Your deposit: USD 25.00 refunded", "Your balance: USD 150.00 refunded"],
+      { timeout: 1000 },
+    );
+  }).toPass({ timeout: 30000 });
   await expect(cancellations).toContainText(/recorded at .* UTC, replayed/);
   await expect(cancellations).not.toContainText("Ben");
   const deposit = cancellations.getByRole("figure").filter({ hasText: "your deposit" });
