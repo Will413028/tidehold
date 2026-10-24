@@ -105,6 +105,10 @@ export function TripForm({
       <label>
         Balance (USD) <input name="balance_usd" type="number" min={0.01} step={0.01} required />
       </label>
+      <label>
+        Balance due (days before the first trip day){" "}
+        <input name="balance_due_days" type="number" min={0} max={120} step={1} defaultValue={30} required />
+      </label>
       <fieldset>
         <legend>Mandate: the most settlements may return without asking you</legend>
         <label>

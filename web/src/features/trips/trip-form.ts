@@ -21,6 +21,7 @@ export function tripBody(form: FormData) {
     timezone: String(form.get("timezone") ?? ""),
     mandate_guest_minor: usdToMinor("mandate_guest_usd"),
     mandate_trip_minor: usdToMinor("mandate_trip_usd"),
+    balance_due_days: Number(form.get("balance_due_days")),
   };
 }
 

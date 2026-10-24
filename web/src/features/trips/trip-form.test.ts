@@ -17,6 +17,7 @@ it("sends amounts and mandate caps as cents, area codes as a list, and the bound
     timezone: "Asia/Manila",
     mandate_guest_usd: "100",
     mandate_trip_usd: "0",
+    balance_due_days: "45",
   }))
     form.set(k, v);
 
@@ -35,6 +36,7 @@ it("sends amounts and mandate caps as cents, area codes as a list, and the bound
     timezone: "Asia/Manila",
     mandate_guest_minor: 10000,
     mandate_trip_minor: 0,
+    balance_due_days: 45,
   });
 });
 
