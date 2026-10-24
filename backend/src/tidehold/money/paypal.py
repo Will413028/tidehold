@@ -24,6 +24,7 @@ from tidehold.platform.errors import Conflict, OutcomeUnknown
 
 # Not configurable: no setting can point tidehold at live PayPal.
 SANDBOX_API = "https://api-m.sandbox.paypal.com"
+OAUTH_PATH = "/v1/oauth2/token"
 
 
 class PayPalError(Conflict):
@@ -135,7 +136,7 @@ class PayPalClient:
             return self._token
         response = await self._send(
             "POST",
-            "/v1/oauth2/token",
+            OAUTH_PATH,
             headers={"Authorization": f"Basic {self._basic}"},
             data={"grant_type": "client_credentials"},
         )
@@ -293,3 +294,34 @@ def capture_of(order: dict[str, Any]) -> Capture:
     with answered("PAYPAL_CAPTURE_UNEXPECTED"):
         capture = _first_payment(order, "captures")
         return Capture(str(capture["id"]), str(capture["status"]), minor_of(capture["amount"]))
+
+
+def captures_of(order: dict[str, Any]) -> list[Capture]:
+    """Every capture an order shows, across its purchase units (none is not an error)."""
+    with answered("PAYPAL_ORDER_UNEXPECTED"):
+        units = order.get("purchase_units") or []
+        return [
+            Capture(str(capture["id"]), str(capture["status"]), minor_of(capture["amount"]))
+            for unit in units
+            for capture in ((unit.get("payments") or {}).get("captures") or [])
+        ]
+
+
+class ReadOnlyRefused(Exception):
+    """A request other than a read reached the read-only transport: a programming error."""
+
+
+class ReadOnlyTransport(httpx.AsyncBaseTransport):
+    """Lets through reads and the OAuth token request, nothing else, so a client built on it
+    cannot move money whatever its caller does (the nightly reconciliation, plan step 10a)."""
+
+    def __init__(self, inner: httpx.AsyncBaseTransport) -> None:
+        self._inner = inner
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if request.method != "GET" and request.url.path != OAUTH_PATH:
+            raise ReadOnlyRefused(f"{request.method} {request.url.path}")
+        return await self._inner.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()

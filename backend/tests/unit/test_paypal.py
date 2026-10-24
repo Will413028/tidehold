@@ -10,6 +10,8 @@ from tidehold.money.paypal import (
     PayPalError,
     PayPalUnexpectedResponse,
     PayPalUnknownOutcome,
+    ReadOnlyRefused,
+    ReadOnlyTransport,
     capture_of,
     refunds_of,
     usd,
@@ -196,3 +198,25 @@ async def test_a_capture_is_read_by_its_id() -> None:
 
     assert (capture.capture_id, capture.status, capture.amount_minor) == ("C1", "PENDING", 3000)
     assert (seen[-1].method, seen[-1].url.path) == ("GET", "/v2/payments/captures/C1")
+
+
+async def test_the_read_only_transport_reads_but_never_sends() -> None:
+    seen: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/v1/oauth2/token":
+            return TOKEN
+        return httpx.Response(200, json={"id": "O1", "status": "COMPLETED"})
+
+    client = PayPalClient("id", "secret", transport=ReadOnlyTransport(httpx.MockTransport(handle)))
+
+    assert (await client.get_order("O1"))["id"] == "O1"
+    with pytest.raises(ReadOnlyRefused):
+        await client.capture_order("O1", request_id="tidehold-open-1")
+    with pytest.raises(ReadOnlyRefused):
+        await client.refund("C1", amount_minor=100, request_id="tidehold-refund-1", invoice_id="i")
+    assert [(r.method, r.url.path) for r in seen] == [
+        ("POST", "/v1/oauth2/token"),
+        ("GET", "/v2/checkout/orders/O1"),
+    ]

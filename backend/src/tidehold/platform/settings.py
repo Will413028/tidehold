@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from urllib.parse import urlsplit
 
 # D22: the developer's choice from the run at prompt 00bdb5c3b65fa352 (model-benchmark.md).
@@ -79,6 +80,12 @@ def model_keys_from_env() -> ModelKeys:
 def database_url_from_env() -> str:
     """What the migration command needs, without the web settings."""
     return os.environ["DATABASE_URL"]
+
+
+def reconcile_log_dir_from_env() -> Path:
+    """Where the nightly reconciliation writes its evidence log (plan step 10a): a volume the
+    nightly rebuild keeps."""
+    return Path(os.environ["RECONCILE_LOG_DIR"])
 
 
 def from_env() -> Settings:
