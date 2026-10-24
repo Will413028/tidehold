@@ -3,22 +3,34 @@
 import { type FormEvent, useState } from "react";
 import { ApiError, api } from "@/lib/api";
 import { type Column, Grid } from "@/lib/grid";
+import type { Credit } from "./console-types";
+import { type GuestRow, guestRows } from "./guest-rows";
 import type { Trip } from "./types";
 
-type Guest = Trip["guests"][number];
-
-const COLUMNS: Column<Guest>[] = [
+// a phone shows the balance state and what was paid; the rest is wide (no sideways scroll)
+const COLUMNS: Column<GuestRow>[] = [
   { headerName: "Guest", field: "name" },
-  { headerName: "Deposit", field: "deposit_state" },
-  { headerName: "Balance", valueGetter: ({ data }) => data?.balance_state ?? "no payment" },
+  { headerName: "Deposit", field: "deposit_state", wide: true },
+  { headerName: "Balance", field: "balance" },
+  { headerName: "Paid", field: "paid" },
+  { headerName: "Refunded", field: "refunded", wide: true },
+  { headerName: "Credited", field: "credited", wide: true },
   {
     headerName: "Link",
     maxWidth: 80,
-    cellRenderer: ({ data }: { data?: Guest }) => data && <a href={`/g/${data.token}`}>open</a>,
+    cellRenderer: ({ data }: { data?: GuestRow }) => data && <a href={`/g/${data.token}`}>open</a>,
   },
 ];
 
-export function GuestsSection({ trip, onChange }: { trip: Trip; onChange: (trip: Trip) => void }) {
+export function GuestsSection({
+  trip,
+  credits,
+  onChange,
+}: {
+  trip: Trip;
+  credits: Credit[];
+  onChange: (trip: Trip) => void;
+}) {
   const [error, setError] = useState<string | null>(null);
 
   async function invite(event: FormEvent<HTMLFormElement>) {
@@ -37,7 +49,7 @@ export function GuestsSection({ trip, onChange }: { trip: Trip; onChange: (trip:
   return (
     <section>
       <h2>Guests</h2>
-      <Grid label="Guests" rows={trip.guests} columns={COLUMNS} rowId={(g) => g.id} />
+      <Grid label="Guests" rows={guestRows(trip.guests, credits)} columns={COLUMNS} rowId={(g) => g.id} />
       <form onSubmit={(e) => void invite(e)}>
         <label>
           Invite guest <input name="name" required maxLength={80} />

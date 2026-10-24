@@ -7,7 +7,7 @@ import { formatUsd } from "@/lib/money";
 import { OperatorNav } from "@/lib/nav";
 import { ActivitySection } from "./ActivitySection";
 import { CancelForm } from "./CancelForm";
-import type { Evidence, FailedAction, Proposal, TimelineEvent } from "./console-types";
+import type { Credit, Evidence, FailedAction, Proposal, TimelineEvent } from "./console-types";
 import { EvidenceSection } from "./EvidenceSection";
 import { GuestsSection } from "./GuestsSection";
 import { ProposalsSection } from "./ProposalsSection";
@@ -19,22 +19,25 @@ export function TripPage({ id }: { id: string }) {
   const [evidence, setEvidence] = useState<Evidence | null>(null);
   const [failed, setFailed] = useState<FailedAction[]>([]);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
+  const [credits, setCredits] = useState<Credit[]>([]);
   const [missing, setMissing] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
-      const [t, p, e, f, l] = await Promise.all([
+      const [t, p, e, f, l, c] = await Promise.all([
         api<Trip>(`/api/trips/${id}`),
         api<Proposal[]>(`/api/trips/${id}/proposals`),
         api<Evidence>(`/api/trips/${id}/evidence`),
         api<FailedAction[]>(`/api/trips/${id}/failed-actions`),
         api<TimelineEvent[]>(`/api/trips/${id}/timeline`),
+        api<Credit[]>(`/api/trips/${id}/credits`),
       ]);
       setTrip(t);
       setProposals(p);
       setEvidence(e);
       setFailed(f);
       setTimeline(l);
+      setCredits(c);
     } catch {
       setMissing(true); // another workspace's trip, or no workspace: 404 or 401
     }
@@ -58,7 +61,7 @@ export function TripPage({ id }: { id: string }) {
         {formatUsd(trip.mandate_guest_minor)} per guest, {formatUsd(trip.mandate_trip_minor)} per trip ·
         warnings: {trip.warning_source} {trip.warning_areas.join(", ")}
       </p>
-      <GuestsSection trip={trip} onChange={setTrip} />
+      <GuestsSection trip={trip} credits={credits} onChange={setTrip} />
       <EvidenceSection
         trip={trip}
         evidence={evidence}

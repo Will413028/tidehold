@@ -69,6 +69,24 @@ class Guest(BaseModel):
     token: str
     deposit_state: str
     balance_state: str | None
+    # over both payments: what PayPal captured and what was refunded of it
+    paid_minor: int
+    refunded_minor: int
+    # the operator released the guest from an unpaid balance (D21)
+    released: bool
+
+
+def _guest(g: DictRow) -> Guest:
+    return Guest(
+        id=g["id"],
+        name=g["name"],
+        token=g["token"],
+        deposit_state=g["deposit_state"],
+        balance_state=g["balance_state"],
+        paid_minor=g["deposit_captured_minor"] + g["balance_captured_minor"],
+        refunded_minor=g["deposit_refunded_minor"] + g["balance_refunded_minor"],
+        released=g["released_at"] is not None,
+    )
 
 
 class Trip(BaseModel):
@@ -93,9 +111,7 @@ class Trip(BaseModel):
 
 
 async def _view(conn: Conn, row: DictRow) -> Trip:
-    guests = [
-        Guest(**{k: g[k] for k in Guest.model_fields}) for g in await store.guests(conn, row["id"])
-    ]
+    guests = [_guest(g) for g in await store.guests(conn, row["id"])]
     own = {k: row[k] for k in Trip.model_fields if k not in ("ends_on", "guests")}
     return Trip(**own, ends_on=store.ends_on(row["starts_on"], row["days"]), guests=guests)
 

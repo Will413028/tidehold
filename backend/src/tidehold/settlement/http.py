@@ -303,6 +303,31 @@ async def failed_actions(trip_id: UUID, workspace_id: Workspace, conn: Db) -> li
     return [FailedAction(**row) for row in rows]
 
 
+class Credit(BaseModel):
+    guest_id: UUID
+    proposal_id: UUID
+    purpose: str
+    amount_minor: int
+    expires_at: datetime | None
+    created_at: datetime
+
+
+@router.get("/trips/{trip_id}/credits")
+async def trip_credits(trip_id: UUID, workspace_id: Workspace, conn: Db) -> list[Credit]:
+    """The trip's credits: a credit is a ledger record only (PayPal has no voucher), so this
+    is where the operator sees who holds one."""
+    await trips.trip(conn, workspace_id, trip_id)
+    rows = await (
+        await conn.execute(
+            "select c.guest_id, c.proposal_id, c.purpose, c.amount_minor, c.expires_at,"
+            " c.created_at from credits c join guests g on g.id = c.guest_id"
+            " where g.trip_id = %s order by c.created_at, c.purpose",
+            (trip_id,),
+        )
+    ).fetchall()
+    return [Credit(**row) for row in rows]
+
+
 class GuestWarning(BaseModel):
     source: str
     event: str

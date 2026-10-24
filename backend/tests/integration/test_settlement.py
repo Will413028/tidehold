@@ -573,6 +573,29 @@ async def test_a_credit_remedy_records_a_deposit_credit_with_its_expiry(
     assert _moved(paypal, "refund") == 0
 
 
+async def test_the_operator_sees_each_guests_credits(
+    operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
+) -> None:
+    credit = _rule(
+        scope="per_trip",
+        quote=WHOLE_TRIP_RULE["quote"],
+        remedies=[{"kind": "credit", "percent": 100, "deductions": [], "credit_expiry_months": 12}],
+    )
+    trip = await _trip(operator, [credit])
+    await _guest(operator, client, conn, paypal, trip["id"])
+    proposal = await _cancel(operator, trip["id"], "rest", 1)
+
+    response = await operator.get(f"/api/trips/{trip['id']}/credits")
+
+    guest_id = (await operator.get(f"/api/trips/{trip['id']}")).json()["guests"][0]["id"]
+    credits = sorted(response.json(), key=lambda c: c["purpose"])
+    assert [(c["guest_id"], c["purpose"], c["amount_minor"]) for c in credits] == [
+        (guest_id, "balance", 30000),
+        (guest_id, "deposit", 5000),
+    ]
+    assert {c["proposal_id"] for c in credits} == {proposal["id"]}
+
+
 async def test_two_day_cancellations_refund_one_payment_twice_never_above_its_capture(
     operator: AsyncClient, client: AsyncClient, conn: Conn, paypal: FakePayPal
 ) -> None:
@@ -605,6 +628,8 @@ async def test_two_day_cancellations_refund_one_payment_twice_never_above_its_ca
         ("deposit", 3333),
         ("balance", 20000),
     ]
+    guest = (await operator.get(f"/api/trips/{trip['id']}")).json()["guests"][0]
+    assert (guest["paid_minor"], guest["refunded_minor"], guest["released"]) == (35000, 34999, False)
 
 
 async def test_the_rest_of_a_trip_after_an_executed_day_refund_returns_the_full_remainder(
@@ -1734,6 +1759,11 @@ async def test_a_released_guest_is_left_out_of_later_settlements(
 
     assert released.json()["state"] == "answered"
     assert (pay.status_code, pay.json()) == (409, {"detail": "GUEST_RELEASED"})
+    rows = (await operator.get(f"/api/trips/{trip['id']}")).json()["guests"]
+    assert [(g["name"], g["released"], g["paid_minor"]) for g in rows] == [
+        ("Ana", False, 35000),
+        ("Ben", True, 0),
+    ]
     view = await _guest_view(client, ben_token)
     assert view["released"] is True
     assert view["balance"]["payment"]["due_minor"] == 0

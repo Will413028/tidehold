@@ -64,6 +64,16 @@ export type Recorded = {
   recorded_at: string;
 };
 
+/** A ledger credit (PayPal has no voucher): `GET /trips/{id}/credits`. */
+export type Credit = {
+  guest_id: string;
+  proposal_id: string;
+  purpose: "deposit" | "balance";
+  amount_minor: number;
+  expires_at: string | null;
+  created_at: string;
+};
+
 export type FailedAction = {
   kind: string;
   subject: string;

@@ -4,6 +4,11 @@ type GuestRow = {
   token: string;
   deposit_state: string;
   balance_state: string | null;
+  /** over both payments, from PayPal's captures and refunds */
+  paid_minor: number;
+  refunded_minor: number;
+  /** released by the operator from an unpaid balance */
+  released: boolean;
 };
 
 export type Trip = {
