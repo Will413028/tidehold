@@ -200,7 +200,7 @@ Rows 13 and 14 name steps 4b and 6b, removed on 2026-10-23 when D19 chose the gu
   - [x] **10a. Deploy code, built and tested locally** (blocked by: D5, D13, D14, step 9's D18 screens (done 2026-10-24); D23)
     - Scope: the nightly reconciliation job (reads PayPal's state of every money command tidehold recorded that day, logs mismatches to the evidence log, sends nothing to PayPal); the per-address cap on workspace creation behind the proxy (D15); the isolated compose project (`-p tidehold`) with its hostname, secrets by path (D13), recorded feeds mounted read-only from the D14 location and ingested by the worker, and memory limits; the nightly schedule at a time other than 10:00 UTC. Nothing runs on the VM.
     - Acceptance: the reconciliation test lists every money command of the day with PayPal's state and reports a seeded mismatch (a refund command marked succeeded that PayPal's order does not list); mutation: let the job skip refunds → that test fails; the workspace-creation cap test; `docker compose -p tidehold config` validates; `make check` green and CI green.
-  - [ ] **10b. Deploy to the VM** (blocked by: 10a; step 9 done, unit 8's seed included; the developer's approval of the deploy)
+  - [ ] **10b. Deploy to the VM** (blocked by: 10a; the developer's approval of the deploy, given 2026-10-25; step 9's unit 8 seed no longer blocks it, D23 amended 2026-10-25, and ships as a later revision)
     - Scope: run 10a's compose project on the VM and publish the hostname.
     - Acceptance: the remaining items of step 10's Acceptance (public URL, judge path in a fresh browser, the fallback's URL still 200 and its holds listed, the nightly job ran once on the VM).
 - [ ] **11. Model order and reliability** (blocked by: steps 2, 5b, 5c and 10; target 2026-11-06)
@@ -308,6 +308,7 @@ Rows 13 and 14 name steps 4b and 6b, removed on 2026-10-23 when D19 chose the gu
   - A: split step 10 into 10a (code built and tested locally, held only by step 9's D18 screens) and 10b (the VM deploy, held by all of step 9 and the developer's approval); a new session starts 10a (chosen)
   - B: keep step 10 whole and wait for step 7's milestone (2026-10-30) and step 9's unit 8; nothing can start before then
   - C: as A, started in the same session as step 9's D18 screens — saves one handoff, against the rule that a session ends at a step boundary
+  - Amended 2026-10-25 (developer): 10b runs before step 9's unit 8 seed, so its unverified items (nightly.sh on the VM, Funnel's `X-Forwarded-For`, memory) are measured while there is time to fix them; the seed ships later as a new revision through `TIDEHOLD_NEXT_REVISION=<sha> ./nightly.sh`. The public URL serves an operator console without the demo seed until then.
 Decision order: D1, D3, D4, D5, D7, D10, D11, D12, D13, D14, D15, D16 decided 2026-10-19; D6, D17 decided 2026-10-20; D18, D19, D20, D21, D22 decided 2026-10-23; D23 decided 2026-10-24; D8 after step 12.
 
 ## Progress
