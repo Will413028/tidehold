@@ -12,7 +12,7 @@
   },
   "tests": {
     "backend-unit": 119,
-    "backend-integration": 196,
+    "backend-integration": 197,
     "web": 27,
     "web-e2e": 12,
     "recorder": 9,
