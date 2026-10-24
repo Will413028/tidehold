@@ -629,7 +629,11 @@ async def test_two_day_cancellations_refund_one_payment_twice_never_above_its_ca
         ("balance", 20000),
     ]
     guest = (await operator.get(f"/api/trips/{trip['id']}")).json()["guests"][0]
-    assert (guest["paid_minor"], guest["refunded_minor"], guest["released"]) == (35000, 34999, False)
+    assert (guest["paid_minor"], guest["refunded_minor"], guest["released"]) == (
+        35000,
+        34999,
+        False,
+    )
 
 
 async def test_the_rest_of_a_trip_after_an_executed_day_refund_returns_the_full_remainder(
