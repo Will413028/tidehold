@@ -139,7 +139,9 @@ class PayPalClient:
         await self._http.aclose()
 
     async def _access_token(self) -> str:
-        if self._token and time.monotonic() < self._token_expires:
+        # The wall clock, not time.monotonic: PayPal's expiry runs on while this host sleeps,
+        # and macOS stops the monotonic clock during sleep.
+        if self._token and time.time() < self._token_expires:
             return self._token
         response = await self._send(
             "POST",
@@ -150,8 +152,11 @@ class PayPalClient:
         with answered("PAYPAL_TOKEN_UNREADABLE"):
             body = response.json()
             self._token = str(body["access_token"])
-            self._token_expires = time.monotonic() + int(body.get("expires_in", 0)) - 60
+            self._token_expires = time.time() + int(body.get("expires_in", 0)) - 60
         return self._token
+
+    async def _bearer(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {await self._access_token()}"}
 
     async def _send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         try:
@@ -177,13 +182,22 @@ class PayPalClient:
         body: dict[str, Any] | None = None,
         request_id: str | None = None,
     ) -> dict[str, Any]:
-        headers = {
-            "Authorization": f"Bearer {await self._access_token()}",
-            "Prefer": "return=representation",
-        }
+        headers = {"Prefer": "return=representation"}
         if request_id:
             headers["PayPal-Request-Id"] = request_id
-        response = await self._send(method, path, json=body, headers=headers)
+        try:
+            response = await self._send(
+                method, path, json=body, headers={**headers, **await self._bearer()}
+            )
+        except PayPalError as error:
+            if error.status != 401:
+                raise
+            # PayPal refused the token before processing the request (expired early or
+            # revoked): a new token, and the same request once more under the same key.
+            self._token = None
+            response = await self._send(
+                method, path, json=body, headers={**headers, **await self._bearer()}
+            )
         with answered("PAYPAL_RESPONSE_UNREADABLE"):
             result: dict[str, Any] = response.json() if response.content else {}
             return result

@@ -1,4 +1,5 @@
 import dataclasses
+import time
 
 import httpx2 as httpx
 import pytest
@@ -82,6 +83,65 @@ async def test_a_refusal_names_paypals_issue() -> None:
 
     with pytest.raises(PayPalError, match="PAYPAL_AUTHORIZATION_VOIDED"):
         await client.void("A1", request_id="tidehold-void-1")
+    await client.aclose()
+
+
+EXPIRED = httpx.Response(401, json={"error": "invalid_token", "error_description": "expired"})
+
+
+def _tokens_then(answers: list[httpx.Response], seen: list[httpx.Request]) -> PayPalClient:
+    """A client whose every token request is answered with a new token, and whose other
+    requests get `answers` in order."""
+    issued = iter(range(1, 100))
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path == "/v1/oauth2/token":
+            return httpx.Response(
+                200, json={"access_token": f"t{next(issued)}", "expires_in": 3600}
+            )
+        return answers.pop(0)
+
+    return PayPalClient("id", "secret", transport=httpx.MockTransport(handle))
+
+
+async def test_a_token_paypal_no_longer_accepts_is_replaced_and_the_request_sent_once_more() -> (
+    None
+):
+    seen: list[httpx.Request] = []
+    client = _tokens_then([EXPIRED, httpx.Response(204)], seen)
+
+    await client.void("A1", request_id="tidehold-void-1")
+
+    sent = [r for r in seen if r.url.path != "/v1/oauth2/token"]
+    assert [r.headers["Authorization"] for r in sent] == ["Bearer t1", "Bearer t2"]
+    assert {r.headers["PayPal-Request-Id"] for r in sent} == {"tidehold-void-1"}
+
+    seen.clear()
+    still = _tokens_then([EXPIRED, EXPIRED], seen)
+    with pytest.raises(PayPalError) as refused:
+        await still.void("A1", request_id="tidehold-void-1")
+    assert refused.value.status == 401
+    assert len([r for r in seen if r.url.path != "/v1/oauth2/token"]) == 2
+    await client.aclose()
+    await still.aclose()
+
+
+async def test_a_token_expires_by_the_wall_clock_so_a_sleeping_host_does_not_reuse_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # macOS stops time.monotonic while the machine sleeps; PayPal's expiry does not stop.
+    seen: list[httpx.Request] = []
+    client = _tokens_then([httpx.Response(204), httpx.Response(204)], seen)
+    now = time.time()
+    monkeypatch.setattr(time, "time", lambda: now)
+    await client.void("A1", request_id="tidehold-void-1")
+
+    monkeypatch.setattr(time, "time", lambda: now + 3600)
+    await client.void("A1", request_id="tidehold-void-2")
+
+    sent = [r for r in seen if r.url.path != "/v1/oauth2/token"]
+    assert [r.headers["Authorization"] for r in sent] == ["Bearer t1", "Bearer t2"]
     await client.aclose()
 
 
