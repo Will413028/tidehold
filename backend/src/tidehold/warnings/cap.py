@@ -5,9 +5,9 @@ Each becomes one `OfficialWarning` per CAP `info` (MeteoAlarm repeats `info` per
 English one is kept). Area codes are what a trip's warning area is matched on: PAGASA's
 SAME/PSGC geocodes, NWS UGC marine zones, MeteoAlarm EMMA_IDs (feeds-matrix.md). A rule matches
 on `event_codes` where the source publishes them (NWS), on the awareness parameters
-(MeteoAlarm) or on the event text (PAGASA has neither). `status` and `supersedes` carry the
-CAP lifecycle: only Actual messages are evidence, and an Update or Cancel replaces the
-messages it references (CAP 1.2 §3.2.1).
+(MeteoAlarm) or on the event text and the wind signal parameter (PAGASA). `status` and
+`supersedes` carry the CAP lifecycle: only Actual messages are evidence, and an Update or
+Cancel replaces the messages it references (CAP 1.2 §3.2.1).
 Feed content is untrusted: XML goes through defusedxml, and nothing here is executed.
 """
 
@@ -86,6 +86,15 @@ def _pairs(info: Element, tag: str) -> dict[str, str]:
     return {_text(p, "valueName"): _text(p, "value") for p in info.findall(f"{CAP}{tag}")}
 
 
+# The CAP parameters a catalogue value is read from: MeteoAlarm's awareness type and level,
+# PAGASA's tropical-cyclone wind signal.
+PAGASA_SIGNAL = "Public Storm Warning Signal Level"
+
+
+def _kept(name: str) -> bool:
+    return name.startswith("awareness_") or name == PAGASA_SIGNAL
+
+
 def _english_infos(alert: Element) -> list[Element]:
     infos = alert.findall(f"{CAP}info")
     english = [i for i in infos if _text(i, "language").lower().startswith("en")]
@@ -129,7 +138,7 @@ def parse_cap(body: str, source: Source, url: str) -> list[OfficialWarning]:
                 area_desc="; ".join(d for d in descriptions if d),
                 area_codes=tuple(dict.fromkeys(codes)),
                 url=url,
-                parameters={k: v for k, v in parameters.items() if k.startswith("awareness_")},
+                parameters={k: v for k, v in parameters.items() if _kept(k)},
                 event_codes=_pairs(info, "eventCode"),
                 supersedes=_references(_text(alert, "references")),
             )

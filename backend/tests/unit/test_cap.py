@@ -32,6 +32,15 @@ def test_a_recorded_pagasa_cap_document_is_read() -> None:
     assert warning.event_codes == {}
 
 
+def test_a_recorded_pagasa_tropical_cyclone_warning_keeps_its_signal_level() -> None:
+    [warning] = from_envelope(_envelope("pagasa-20261021T030020"))
+
+    assert warning.event == "Tropical Cyclone Warning"
+    assert warning.area_codes == ("020900000",)
+    # the signal is a CAP parameter, so matching never reads the headline
+    assert warning.parameters == {"Public Storm Warning Signal Level": "2"}
+
+
 def test_a_failed_fetch_carries_no_warning() -> None:
     assert from_envelope(_envelope("pagasa-20261018T175224")) == []
 

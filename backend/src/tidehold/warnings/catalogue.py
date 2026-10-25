@@ -10,14 +10,16 @@ operator is asked instead).
   (read 2026-10-19), marine and coastal entries.
 - MeteoAlarm: `<awareness type>:<colour>` from the `awareness_type` and `awareness_level`
   parameters (MeteoAlarm CAP profile; types as recorded, e.g. "1; Wind", levels 2-4).
-- PAGASA: the event stem before any "(...)" status, as recorded. Only flood advisories have been
-  recorded up to 2026-10-19; tropical-cyclone wind signals are added when one is recorded
-  (feeds-matrix.md), not from guesswork.
+- PAGASA: the event stem before any "(...)" status, as recorded; a Tropical Cyclone Warning adds
+  its wind signal from the `Public Storm Warning Signal Level` parameter ("... : Signal #2").
+  Signals #1 and #2 were recorded 2026-10-20 to 10-23 (Super Typhoon Rosal); #3 to #5 are the
+  rest of PAGASA's five-level scheme and are assumed to carry the same parameter. A warning
+  without a signal, or with one outside the scheme, has a value outside the catalogue.
 """
 
 from collections.abc import Mapping
 
-from tidehold.warnings.cap import OfficialWarning, Source
+from tidehold.warnings.cap import PAGASA_SIGNAL, OfficialWarning, Source
 
 # Each ladder lists one hazard from the least to the most severe; "X or stronger" in an
 # operator's wording means X and everything after it on X's ladder.
@@ -44,6 +46,8 @@ METEOALARM_TYPES = (
 METEOALARM_COLOURS = ("yellow", "orange", "red")
 
 PAGASA_EVENTS = ("General Flood Advisory",)
+PAGASA_CYCLONE = "Tropical Cyclone Warning"
+PAGASA_SIGNALS = tuple(f"{PAGASA_CYCLONE}: Signal #{n}" for n in range(1, 6))
 
 
 # Per source, groups of values: each ladder from least to most severe, then a group of the rest.
@@ -52,7 +56,7 @@ GROUPS: dict[Source, tuple[tuple[str, ...], ...]] = {
     "meteoalarm": tuple(
         tuple(f"{kind}:{colour}" for colour in METEOALARM_COLOURS) for kind in METEOALARM_TYPES
     ),
-    "pagasa": (PAGASA_EVENTS,),
+    "pagasa": (PAGASA_SIGNALS, PAGASA_EVENTS),
 }
 
 
@@ -74,7 +78,9 @@ def value_of(source: str, event: str, parameters: Mapping[str, str]) -> str:
             colour = _after_number(parameters.get("awareness_level", "")).lower()
             return f"{kind}:{colour}"
         case "pagasa":
-            return event.split("(")[0].strip()
+            stem = event.split("(")[0].strip()
+            signal = parameters.get(PAGASA_SIGNAL)
+            return f"{stem}: Signal #{signal}" if stem == PAGASA_CYCLONE and signal else stem
         case _:
             return event
 

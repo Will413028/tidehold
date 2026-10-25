@@ -229,6 +229,26 @@ def test_recorded_warnings_map_to_catalogue_values() -> None:
     yellow_wind = {"awareness_type": "1; Wind", "awareness_level": "2; yellow; Moderate"}
     assert event_value(_warning("meteoalarm", "Yellow wind warning", yellow_wind)) == "Wind:yellow"
     assert event_value(_warning("pagasa", "General Flood Advisory (Final)")) in values("pagasa")
+    signal_2 = {"Public Storm Warning Signal Level": "2"}
+    typhoon = event_value(_warning("pagasa", "Tropical Cyclone Warning", signal_2))
+    assert typhoon == "Tropical Cyclone Warning: Signal #2"
+    assert typhoon in values("pagasa")
+
+
+def test_a_pagasa_signal_outside_the_catalogue_matches_no_rule() -> None:
+    # no signal level, or one PAGASA does not publish: the value is not in the catalogue, so
+    # no confirmed event set contains it and the operator is asked
+    bare = event_value(_warning("pagasa", "Tropical Cyclone Warning"))
+    six = event_value(
+        _warning("pagasa", "Tropical Cyclone Warning", {"Public Storm Warning Signal Level": "6"})
+    )
+    assert bare not in values("pagasa")
+    assert six not in values("pagasa")
+
+
+def test_pagasa_signals_form_one_ladder_from_the_weakest() -> None:
+    [ladder] = [g for g in GROUPS["pagasa"] if "Tropical Cyclone Warning: Signal #1" in g]
+    assert ladder == tuple(f"Tropical Cyclone Warning: Signal #{n}" for n in range(1, 6))
 
 
 def _recording(seen: list[httpx.Request], answer: httpx.Response) -> httpx.AsyncClient:

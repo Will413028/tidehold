@@ -8,6 +8,7 @@ from psycopg.rows import DictRow
 
 from tidehold.identity.sessions import new_workspace
 from tidehold.platform.db import Conn
+from tidehold.settlement import matching
 from tidehold.warnings import store
 from tidehold.warnings.cap import parse_cap
 
@@ -46,8 +47,22 @@ async def test_recorded_feeds_are_ingested_once(conn: Conn) -> None:
     first = await _ingest(conn)
     again = await _ingest(conn)
 
-    assert first == {"new": 260, "seen": 0, "unreadable": 0}
-    assert again == {"new": 0, "seen": 260, "unreadable": 0}
+    assert first == {"new": 261, "seen": 0, "unreadable": 0}
+    assert again == {"new": 0, "seen": 261, "unreadable": 0}
+
+
+async def test_a_stored_pagasa_typhoon_warning_matches_on_its_signal(conn: Conn) -> None:
+    await _ingest(conn)
+    row = await (
+        await conn.execute(
+            "select * from official_warnings where source = 'pagasa'"
+            " and event = 'Tropical Cyclone Warning'"
+        )
+    ).fetchone()
+
+    assert row is not None
+    assert row["area_codes"] == ["020900000"]  # Batanes
+    assert matching.value(row) == "Tropical Cyclone Warning: Signal #2"
 
 
 async def test_evidence_fetched_after_the_decision_time_is_invisible(conn: Conn) -> None:
