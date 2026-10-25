@@ -137,7 +137,7 @@ D18 removed holds, so the finalize, capture and reauthorization screens this sec
 
 ## Recorded for later steps
 
-- Step 10: measure where the 1-2 s per API call under `make check` came from (a new PostgreSQL connection per request, `platform/db.py`, or something else) on the VM before choosing a pool (`psycopg_pool` would be a new dependency, needing approval); recheck on a real phone the two unexplained layout symptoms (AG Grid `autoHeight` drew added rows over later content; clicks under Pixel 7 emulation landed above their target), and if found, return to `autoHeight` and device emulation.
+- Step 10 (the measurement done 2026-10-25, no pool: plan progress row 10b; the real-phone check still open): measure where the 1-2 s per API call under `make check` came from (a new PostgreSQL connection per request, `platform/db.py`, or something else) on the VM before choosing a pool (`psycopg_pool` would be a new dependency, needing approval); recheck on a real phone the two unexplained layout symptoms (AG Grid `autoHeight` drew added rows over later content; clicks under Pixel 7 emulation landed above their target), and if found, return to `autoHeight` and device emulation.
 - Step 11, when the explanation is drafted: one producer of the guest and operator wording (the operator page repeats "day N / days N to M" and refund/release in `features/trips/proposal-view.ts`), one shape of the guest view (`settlement/guest.py` dataclasses and `http.py` response models), and backend `Literal` types for states and kinds; generating the web types from FastAPI's OpenAPI (`openapi-typescript`, a new dependency) is the alternative to the hand-written mirrors.
 
 ## Design review at start (2026-10-20)
