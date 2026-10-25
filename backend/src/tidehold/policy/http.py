@@ -45,11 +45,19 @@ class Clause(BaseModel):
     warning_clause: str | None
 
 
+class QuotedFrom(BaseModel):
+    name: str
+    url: str
+    accessed: str
+
+
 class Version(BaseModel):
     id: UUID
     created_at: datetime
     compilation_id: UUID | None
     wording: str
+    # set when the wording is a real operator's published text (the demo seed)
+    quoted_from: QuotedFrom | None
     warning_source: str | None
     products: list[str]
     rules: list[Clause]
@@ -78,6 +86,7 @@ def _view(row: DictRow) -> Version:
         created_at=row["created_at"],
         compilation_id=row["compilation_id"],
         wording=wording,
+        quoted_from=row["quoted_from"],
         warning_source=row["warning_source"],
         products=sorted(versions.products(row)),
         rules=_clauses(wording, row["rules"]),
@@ -93,9 +102,7 @@ async def publish(body: NewVersion, workspace_id: Workspace, conn: Db) -> Versio
         asked = service.asked(call["result"])
     answers = [versions.Answer(a.index, a.answer) for a in body.rulings]
     checked = versions.check(body.wording, body.rules, asked, answers)
-    version_id = await versions.publish(
-        conn, workspace_id, body.wording, checked, body.compilation_id
-    )
+    version_id = await versions.publish(conn, workspace_id, checked, body.compilation_id)
     return _view(await versions.version(conn, workspace_id, version_id))
 
 

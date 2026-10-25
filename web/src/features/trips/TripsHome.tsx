@@ -7,6 +7,7 @@ import { formatDateRange } from "@/lib/dates";
 import { type Column, Grid } from "@/lib/grid";
 import { formatUsd } from "@/lib/money";
 import { OperatorNav } from "@/lib/nav";
+import { DemoOperator } from "./DemoOperator";
 import { TripForm } from "./TripForm";
 import type { Trip } from "./types";
 
@@ -30,21 +31,26 @@ const COLUMNS: Column<Trip>[] = [
 export function TripsHome() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [versions, setVersions] = useState<PolicyVersion[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     // no workspace yet (401): it is created with the first policy or trip
-    api<Trip[]>("/api/trips")
-      .then(setTrips)
-      .catch(() => setTrips([]));
-    api<PolicyVersion[]>("/api/policy-versions")
-      .then(setVersions)
-      .catch(() => setVersions([]));
+    void Promise.all([
+      api<Trip[]>("/api/trips")
+        .then(setTrips)
+        .catch(() => setTrips([])),
+      api<PolicyVersion[]>("/api/policy-versions")
+        .then(setVersions)
+        .catch(() => setVersions([])),
+    ]).finally(() => setLoaded(true));
   }, []);
 
   return (
     <main>
       <OperatorNav />
       <h1>Trips</h1>
+      {/* the backend seeds only a workspace with neither */}
+      {loaded && trips.length === 0 && versions.length === 0 && <DemoOperator />}
       <Grid label="Trips" rows={trips} columns={COLUMNS} rowId={(t) => t.id} />
       <h2>New trip</h2>
       <TripForm versions={versions} onCreated={(trip) => setTrips((all) => [...all, trip])} />

@@ -1,3 +1,5 @@
+import type { QuotedFrom } from "@/lib/api-types";
+
 export type PaymentView = {
   state: "pending" | "captured";
   amount_minor: number;
@@ -63,4 +65,6 @@ export type SettlementView = {
     explanation: string;
   }[];
   credits: { purpose: string; amount_minor: number; expires_at: string | null }[];
+  /** where the policy wording is quoted from, when it is a real operator's (the demo) */
+  quoted_from: QuotedFrom | null;
 };

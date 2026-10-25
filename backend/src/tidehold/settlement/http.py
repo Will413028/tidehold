@@ -370,16 +370,24 @@ class GuestCredit(BaseModel):
     expires_at: datetime | None
 
 
+class QuotedFrom(BaseModel):
+    name: str
+    url: str
+    accessed: str
+
+
 class GuestSettlements(BaseModel):
     """Only this guest's lines: no other guest's name or amount, and no internal ids."""
 
     settlements: list[GuestSettlement]
     credits: list[GuestCredit]
+    # the real operator whose published wording the clauses quote; null for an operator's own
+    quoted_from: QuotedFrom | None
 
 
 @guest_router.get("/settlement")
 async def guest_settlement(token: str, conn: Db) -> GuestSettlements:
-    settlements, credits = await guest.view(conn, token)
+    view = await guest.view(conn, token)
     return GuestSettlements(
         settlements=[
             GuestSettlement(
@@ -392,7 +400,8 @@ async def guest_settlement(token: str, conn: Db) -> GuestSettlements:
                 outcomes=[GuestOutcome(**vars(o)) for o in s.outcomes],
                 explanation=s.explanation,
             )
-            for s in settlements
+            for s in view.settlements
         ],
-        credits=[GuestCredit(**c) for c in credits],
+        credits=[GuestCredit(**c) for c in view.credits],
+        quoted_from=None if view.quoted_from is None else QuotedFrom(**view.quoted_from),
     )

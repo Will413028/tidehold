@@ -37,6 +37,7 @@ const VIEW: SettlementView = {
     },
   ],
   credits: [{ purpose: "deposit", amount_minor: 5000, expires_at: "2027-10-20T00:00:00Z" }],
+  quoted_from: null,
 };
 
 it("shows the operator's cancellation, the warning with its recorded label, the clause and the outcome", () => {
@@ -51,8 +52,24 @@ it("shows the operator's cancellation, the warning with its recorded label, the 
   expect(html).toContain("Credit: USD 50.00 (deposit), valid until 2027-10-20");
 });
 
+it("attributes a quoted real operator's clause, and adds nothing for an operator's own", () => {
+  const quoted_from = {
+    name: "Pure Dive Resort",
+    url: "https://purediveresort.com/deep-diving/",
+    accessed: "2026-10-19",
+  };
+  const html = renderToStaticMarkup(<GuestSettlements view={{ ...VIEW, quoted_from }} />);
+
+  expect(html).toContain(
+    "Quoted from Pure Dive Resort&#x27;s published policy (https://purediveresort.com/deep-diving/, accessed 2026-10-19).",
+  );
+  expect(renderToStaticMarkup(<GuestSettlements view={VIEW} />)).not.toContain("Quoted from");
+});
+
 it("shows nothing when the operator has cancelled nothing", () => {
-  expect(renderToStaticMarkup(<GuestSettlements view={{ settlements: [], credits: [] }} />)).toBe("");
+  expect(
+    renderToStaticMarkup(<GuestSettlements view={{ settlements: [], credits: [], quoted_from: null }} />),
+  ).toBe("");
 });
 
 it("words an outcome by what it has done so far", () => {

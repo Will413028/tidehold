@@ -150,8 +150,17 @@ def _explanation(
     return " ".join(parts)
 
 
-async def view(conn: Conn, token: str) -> tuple[list[Settlement], list[DictRow]]:
-    """The guest's settlements (a rejected one is withdrawn, so not shown) and its credits."""
+@dataclass(frozen=True)
+class View:
+    settlements: list[Settlement]
+    credits: list[DictRow]
+    # where the trip's policy wording is quoted from, when it is a real operator's (demo seed)
+    quoted_from: dict[str, str] | None
+
+
+async def view(conn: Conn, token: str) -> View:
+    """The guest's settlements (a rejected one is withdrawn, so not shown), its credits, and
+    the source of the policy wording its clauses are cut from."""
     guest = await trips.guest_by_token(conn, token)
     rows = await (
         await conn.execute(
@@ -186,4 +195,11 @@ async def view(conn: Conn, token: str) -> tuple[list[Settlement], list[DictRow]]
             (guest["id"],),
         )
     ).fetchall()
-    return settlements, credits
+    version = await (
+        await conn.execute(
+            "select v.quoted_from from policy_versions v join trips t"
+            " on t.policy_version_id = v.id where t.id = %s",
+            (guest["trip_id"],),
+        )
+    ).fetchone()
+    return View(settlements, credits, version["quoted_from"] if version else None)

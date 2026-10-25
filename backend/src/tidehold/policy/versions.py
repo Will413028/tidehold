@@ -42,6 +42,7 @@ class Answer:
 
 @dataclass(frozen=True)
 class Checked:
+    wording: str
     rules: list[dict[str, Any]]
     rulings: list[dict[str, Any]]
     warning_source: str | None
@@ -160,25 +161,42 @@ def check(
         Span(*at) for item in checked for spans in item["deduction_spans"] for at in spans
     ]
     rulings = _check_rulings(asked, answers, wording, clauses, deductions)
-    return Checked(checked, rulings, next(iter(sources), None))
+    return Checked(wording, checked, rulings, next(iter(sources), None))
+
+
+@dataclass(frozen=True)
+class QuotedFrom:
+    """The real operator whose published wording a version quotes (the demo seed only)."""
+
+    name: str
+    url: str
+    accessed: str  # ISO date
 
 
 async def publish(
-    conn: Conn, workspace_id: UUID, wording: str, checked: Checked, compilation_id: UUID | None
+    conn: Conn,
+    workspace_id: UUID,
+    checked: Checked,
+    compilation_id: UUID | None,
+    quoted_from: QuotedFrom | None = None,
 ) -> UUID:
-    row = await insert_returning(
-        conn,
-        "insert into policy_versions (workspace_id, wording, rules, rulings, warning_source,"
-        " compilation_id) values (%s, %s, %s, %s, %s, %s) returning id",
-        (
-            workspace_id,
-            wording,
-            Jsonb(checked.rules),
-            Jsonb(checked.rulings),
-            checked.warning_source,
-            compilation_id,
-        ),
-    )
+    async with conn.transaction():
+        # the demo seed checks the workspace is empty under this lock (bootstrap/demo.py)
+        await conn.execute("select 1 from workspaces where id = %s for update", (workspace_id,))
+        row = await insert_returning(
+            conn,
+            "insert into policy_versions (workspace_id, wording, rules, rulings, warning_source,"
+            " compilation_id, quoted_from) values (%s, %s, %s, %s, %s, %s, %s) returning id",
+            (
+                workspace_id,
+                checked.wording,
+                Jsonb(checked.rules),
+                Jsonb(checked.rulings),
+                checked.warning_source,
+                compilation_id,
+                None if quoted_from is None else Jsonb(vars(quoted_from)),
+            ),
+        )
     version_id: UUID = row["id"]
     return version_id
 

@@ -9,6 +9,7 @@ from enum import StrEnum
 
 from fastapi import APIRouter, Depends, FastAPI
 
+from tidehold.bootstrap import demo
 from tidehold.holds import http as holds
 from tidehold.identity import sessions
 from tidehold.policy import http as policy
@@ -31,7 +32,13 @@ async def health_check() -> dict[str, str]:
 
 
 TABLE: dict[Access, list[APIRouter]] = {
-    Access.WORKSPACE: [sessions.router, policy.router, trips.router, settlement.router],
+    Access.WORKSPACE: [
+        sessions.router,
+        policy.router,
+        trips.router,
+        settlement.router,
+        demo.router,
+    ],
     Access.GUEST: [holds.router, settlement.guest_router],
     Access.PUBLIC: [health, sessions.public_router, holds.public_router],
 }

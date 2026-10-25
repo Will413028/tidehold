@@ -36,7 +36,7 @@ const PAID = {
 
 it("shows the trip and both payments", () => {
   const html = renderToStaticMarkup(
-    <GuestTrip token="t" view={VIEW} settlement={{ settlements: [], credits: [] }} />,
+    <GuestTrip token="t" view={VIEW} settlement={{ settlements: [], credits: [], quoted_from: null }} />,
   );
 
   expect(html).toContain("Anilao weekend");
@@ -76,7 +76,7 @@ it("shows what is still due, and offers nothing once nothing is due or the guest
   const released = { ...reduced, released: true };
 
   const html = renderToStaticMarkup(
-    <GuestTrip token="t" view={reduced} settlement={{ settlements: [], credits: [] }} />,
+    <GuestTrip token="t" view={reduced} settlement={{ settlements: [], credits: [], quoted_from: null }} />,
   );
 
   expect(html).toContain("Balance: USD 200.00, due 2026-11-05");
@@ -87,7 +87,11 @@ it("shows what is still due, and offers nothing once nothing is due or the guest
   ]);
   expect(
     renderToStaticMarkup(
-      <GuestTrip token="t" view={released} settlement={{ settlements: [], credits: [] }} />,
+      <GuestTrip
+        token="t"
+        view={released}
+        settlement={{ settlements: [], credits: [], quoted_from: null }}
+      />,
     ),
   ).toContain("released by the operator, nothing more to pay");
 });
@@ -100,7 +104,7 @@ it("shows a paid balance as paid", () => {
   };
 
   const html = renderToStaticMarkup(
-    <GuestTrip token="t" view={paid} settlement={{ settlements: [], credits: [] }} />,
+    <GuestTrip token="t" view={paid} settlement={{ settlements: [], credits: [], quoted_from: null }} />,
   );
 
   expect(html).toContain("Balance: USD 300.00: paid");

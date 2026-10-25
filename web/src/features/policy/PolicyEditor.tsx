@@ -32,7 +32,11 @@ export function PolicyEditor() {
 
   useEffect(() => {
     api<PolicyVersion[]>("/api/policy-versions")
-      .then(setVersions)
+      .then((all) => {
+        setVersions(all);
+        // start from the latest published wording, so it can be recompiled or edited
+        setWording((typed) => typed || (all.at(-1)?.wording ?? ""));
+      })
       .catch(() => setVersions([])); // no workspace yet
   }, []);
 

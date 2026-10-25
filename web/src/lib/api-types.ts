@@ -7,11 +7,15 @@ type Clause = {
   warning_clause: string | null;
 };
 
+/** The real operator whose published wording a version quotes (the demo seed only). */
+export type QuotedFrom = { name: string; url: string; accessed: string };
+
 export type PolicyVersion = {
   id: string;
   created_at: string;
   compilation_id: string | null;
   wording: string;
+  quoted_from: QuotedFrom | null;
   warning_source: string | null;
   /** the product headings the rules sit under; a trip binds one of them, or none */
   products: string[];

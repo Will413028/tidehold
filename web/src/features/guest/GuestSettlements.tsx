@@ -1,5 +1,6 @@
 import { recordedLabel } from "@/lib/evidence";
 import { formatUsd } from "@/lib/money";
+import { quotedFromText } from "@/lib/quoted-from";
 import type { SettlementView } from "./types";
 
 type Outcome = SettlementView["settlements"][number]["outcomes"][number];
@@ -65,8 +66,15 @@ export function GuestSettlements({ view }: { view: SettlementView }) {
               <figure key={o.purpose}>
                 <figcaption>The operator's policy behind your {o.purpose}:</figcaption>
                 {o.clauses.map((clause) => (
-                  <blockquote key={clause}>{clause}</blockquote>
+                  <blockquote key={clause} cite={view.quoted_from?.url}>
+                    {clause}
+                  </blockquote>
                 ))}
+                {view.quoted_from && (
+                  <p>
+                    <a href={view.quoted_from.url}>{quotedFromText(view.quoted_from)}</a>
+                  </p>
+                )}
               </figure>
             ))}
         </article>
