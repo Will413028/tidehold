@@ -4,7 +4,6 @@
 #
 # Host files, referenced by path and never read by anyone but the containers (D13):
 #   ${SHARED_SECRETS_DIR}/paypal.env    the fallback demo's sandbox app (PAYPAL_CLIENT_ID, ..._SECRET)
-#   ${SHARED_SECRETS_DIR}/models.env    the fallback demo's model keys (either may be empty)
 #   ${TIDEHOLD_SECRETS_DIR}/db_password random database password
 #   ${TIDEHOLD_SECRETS_DIR}/anthropic.env  ANTHROPIC_API_KEY (optional: without it, no-AI path)
 name: tidehold
@@ -84,7 +83,6 @@ services:
     network_mode: service:net
     env_file:
       - "${SHARED_SECRETS_DIR:?set SHARED_SECRETS_DIR}/paypal.env"
-      - "${SHARED_SECRETS_DIR}/models.env"
       - path: "${TIDEHOLD_SECRETS_DIR:?set TIDEHOLD_SECRETS_DIR}/anthropic.env"
         required: false
     environment:

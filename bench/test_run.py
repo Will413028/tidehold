@@ -12,4 +12,4 @@ def test_the_benchmark_runs_a_claude_model_the_product_does_not_run_yet() -> Non
 
     assert isinstance(provider, Claude)
     assert (provider.model, provider.workspace) == ("claude-haiku-5-5", "wrk_1")
-    assert run.SPACING["anthropic"] > 0
+    assert run.SPACING_S > 0

@@ -1,14 +1,12 @@
 """Run the compile benchmark (plan step 2) against live providers.
 
-    cd backend && uv run --frozen python ../bench/run.py [--runs 2] [--models groq:<id>,...]
+    cd backend && uv run --frozen python ../bench/run.py [--runs 2] [--models anthropic:<id>,...]
         [--split dev|held_out|all] [--out ../bench/results/<file>.json]
 
-Keys come from GROQ_API_KEY, GEMINI_API_KEY, and ANTHROPIC_API_KEY with ANTHROPIC_WORKSPACE_ID
-(`tidehold.platform.settings`; via `--env-file`, D13, D22). Calls are sequential and spaced per
-provider so the fallback demo sharing the keys keeps its quota; a per-minute 429 or an
-overloaded answer (503, 529) is counted, waited out once, then recorded as a failure; a spent
-daily quota (for Claude, the monthly spend cap) fails the model's remaining calls without
-sending them. The
+The key comes from ANTHROPIC_API_KEY with ANTHROPIC_WORKSPACE_ID (`tidehold.platform.settings`;
+via `--env-file`, D22). Calls are sequential and spaced; a per-minute 429 or an overloaded
+answer (503, 529) is counted, waited out once, then recorded as a failure; the monthly spend
+cap or a billing error fails the model's remaining calls without sending them. The
 compile path is the product's own (`tidehold.policy`), so the prompt hash recorded here is the
 one step 5 ships.
 """
@@ -30,23 +28,14 @@ import score
 from tidehold.platform.settings import ModelKeys, model_keys_from_env
 from tidehold.policy.compile import CompileFailed, compile_policy, propose_event_set
 from tidehold.policy.prompt import PROMPT_HASH
-from tidehold.policy.providers import Claude, Gemini, Groq, Provider, ProviderError
+from tidehold.policy.providers import Claude, Provider, ProviderError
 from tidehold.warnings.catalogue import GROUPS
 
 HERE = Path(__file__).parent
-CANDIDATES = (
-    "groq:openai/gpt-oss-120b",
-    "groq:openai/gpt-oss-20b",
-    "groq:qwen/qwen3.8-27b",
-    "gemini:gemini-3.8-flash",
-    "gemini:gemini-3.5-flash",
-    "gemini:gemini-3.1-pro-preview",
-    "gemini:gemma-4-31b-it",
-)
-# Seconds between calls per provider: under the free tiers' per-minute limits with room left
-# for the fallback demo (Groq 30 requests/min, Gemini flash 10/min, read 2026-10-19); Claude's
-# Start tier allows 1,000 requests/min per model and its key is not shared (read 2026-10-23).
-SPACING = {"groq": 4.0, "gemini": 10.0, "anthropic": 1.0}
+CANDIDATES = ("anthropic:claude-sonnet-5-5", "anthropic:claude-haiku-5-5")
+# Seconds between calls: Claude's Start tier allows 1,000 requests/min per model (read
+# 2026-10-23).
+SPACING_S = 1.0
 RATE_LIMIT_WAIT_S = 65.0
 # One call and, after a 429 or a 503, one more once the minute has passed.
 TRIES = 2
@@ -86,8 +75,7 @@ class Pacer:
     last: float = 0.0
     limits_hit: int = 0
     unavailable: int = 0
-    # Set once a daily quota is spent: the model's remaining calls fail without a request, so
-    # the run measures the quota once instead of spending the shared key's day (D13).
+    # Set once the spend cap is reached: the model's remaining calls fail without a request.
     exhausted: ProviderError | None = None
 
     async def call(self, make: Callable[[], Awaitable[T]]) -> T:
@@ -116,10 +104,6 @@ class Pacer:
 
 def _provider(spec: str, client: httpx.AsyncClient, keys: ModelKeys) -> Provider:
     vendor, model = spec.split(":", 1)
-    if vendor == "groq" and keys.groq:
-        return Groq(client, keys.groq, model)
-    if vendor == "gemini" and keys.gemini:
-        return Gemini(client, keys.gemini, model)
     # Not through `providers.build`: the benchmark measures Claude models the product does not
     # run until a run is appended to model-benchmark.md (D22).
     if vendor == "anthropic" and keys.anthropic:
@@ -217,7 +201,7 @@ async def bench(spec: str, runs: int, split: str, keys: ModelKeys) -> list[dict[
     results = []
     async with httpx.AsyncClient() as client:
         provider = _provider(spec, client, keys)
-        pacer = Pacer(SPACING[spec.split(":", 1)[0]])
+        pacer = Pacer(SPACING_S)
         for run in range(1, runs + 1):
             started = datetime.now(UTC)
             outcomes = [await _fixture(provider, pacer, n, s) for n, s in fixtures]

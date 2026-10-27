@@ -3,15 +3,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-import httpx2 as httpx
 import pytest
 
 from tidehold.platform.errors import Invalid
 from tidehold.policy import versions
 from tidehold.policy.compile import CompileFailed, compile_policy, propose_event_set
 from tidehold.policy.prompt import compile_prompt
-from tidehold.policy.providers import Completion, Gemini, Groq, ProviderError
-from tidehold.policy.schema import WIRE_SCHEMA, Rule, Ruling
+from tidehold.policy.providers import Completion
+from tidehold.policy.schema import Rule, Ruling
 from tidehold.policy.spans import locate, locate_all
 from tidehold.policy.versions import Answer
 from tidehold.warnings.cap import OfficialWarning
@@ -249,136 +248,6 @@ def test_a_pagasa_signal_outside_the_catalogue_matches_no_rule() -> None:
 def test_pagasa_signals_form_one_ladder_from_the_weakest() -> None:
     [ladder] = [g for g in GROUPS["pagasa"] if "Tropical Cyclone Warning: Signal #1" in g]
     assert ladder == tuple(f"Tropical Cyclone Warning: Signal #{n}" for n in range(1, 6))
-
-
-def _recording(seen: list[httpx.Request], answer: httpx.Response) -> httpx.AsyncClient:
-    def handle(request: httpx.Request) -> httpx.Response:
-        seen.append(request)
-        return answer
-
-    return httpx.AsyncClient(transport=httpx.MockTransport(handle))
-
-
-async def test_groq_calls_name_the_exact_model_cap_tokens_and_send_the_schema() -> None:
-    seen: list[httpx.Request] = []
-    reply = {"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}]}
-    groq = Groq(_recording(seen, httpx.Response(200, json=reply)), "k", "openai/gpt-oss-120b")
-
-    completion = await groq.complete("sys", "user", WIRE_SCHEMA, "compiled_policy")
-
-    body = json.loads(seen[0].content)
-    assert completion.text == "{}"
-    assert body["model"] == "openai/gpt-oss-120b"
-    assert body["max_completion_tokens"] > 0
-    assert body["response_format"]["json_schema"]["strict"] is True
-    assert body["response_format"]["json_schema"]["schema"] == WIRE_SCHEMA
-
-
-async def test_gemini_calls_cap_tokens_and_send_the_schema() -> None:
-    seen: list[httpx.Request] = []
-    reply = {"candidates": [{"content": {"parts": [{"text": "{}"}]}, "finishReason": "STOP"}]}
-    gemini = Gemini(_recording(seen, httpx.Response(200, json=reply)), "k", "gemini-3.5-flash")
-
-    await gemini.complete("sys", "user", WIRE_SCHEMA, "compiled_policy")
-
-    body = json.loads(seen[0].content)
-    assert seen[0].url.path.endswith("/models/gemini-3.5-flash:generateContent")
-    assert body["generationConfig"]["maxOutputTokens"] > 0
-    assert body["generationConfig"]["responseJsonSchema"] == WIRE_SCHEMA
-
-
-@pytest.mark.parametrize(
-    ("answer", "kind"),
-    [
-        (httpx.Response(429, json={}), "rate limited"),
-        (httpx.Response(503, json={}), "transient"),
-        (httpx.Response(500, json={}), "error"),
-        (
-            httpx.Response(
-                200, json={"choices": [{"message": {"content": "{"}, "finish_reason": "length"}]}
-            ),
-            "error",
-        ),
-    ],
-)
-async def test_a_provider_failure_is_a_provider_error(answer: httpx.Response, kind: str) -> None:
-    groq = Groq(_recording([], answer), "k", "openai/gpt-oss-20b")
-
-    with pytest.raises(ProviderError) as raised:
-        await groq.complete("sys", "user", WIRE_SCHEMA, "x")
-
-    assert raised.value.rate_limited is (kind == "rate limited")
-    assert raised.value.transient is (kind in {"rate limited", "transient"})
-
-
-def _gemini_quota(quota_id: str) -> httpx.Response:
-    violation = {"quotaMetric": "generate_content_free_tier_requests", "quotaId": quota_id}
-    error = {"status": "RESOURCE_EXHAUSTED", "details": [{"violations": [violation]}]}
-    return httpx.Response(429, json={"error": error})
-
-
-@pytest.mark.parametrize(
-    ("answer", "named", "daily"),
-    [
-        (
-            _gemini_quota("GenerateRequestsPerDayPerProjectPerModel-FreeTier"),
-            "RESOURCE_EXHAUSTED GenerateRequestsPerDayPerProjectPerModel-FreeTier",
-            True,
-        ),
-        (
-            _gemini_quota("GenerateRequestsPerMinutePerProjectPerModel-FreeTier"),
-            "RESOURCE_EXHAUSTED GenerateRequestsPerMinutePerProjectPerModel-FreeTier",
-            False,
-        ),
-    ],
-)
-async def test_gemini_names_the_spent_quota_and_a_daily_one_is_not_retried(
-    answer: httpx.Response, named: str, *, daily: bool
-) -> None:
-    gemini = Gemini(_recording([], answer), "k", "gemini-3.8-flash")
-
-    with pytest.raises(ProviderError) as raised:
-        await gemini.complete("sys", "user", WIRE_SCHEMA, "x")
-
-    assert raised.value.reason == f"HTTP 429 {named}"
-    assert raised.value.daily is daily
-    assert raised.value.transient is not daily
-
-
-@pytest.mark.parametrize(
-    ("status", "error", "reason", "daily"),
-    [
-        (
-            400,
-            {"code": "json_validate_failed", "message": "Failed", "failed_generation": "{..."},
-            "HTTP 400 json_validate_failed",
-            False,
-        ),
-        (
-            429,
-            {"code": "rate_limit_exceeded", "message": "Limit on tokens per minute (TPM): org_x"},
-            "HTTP 429 rate_limit_exceeded TPM",
-            False,
-        ),
-        (
-            429,
-            {"code": "rate_limit_exceeded", "message": "Limit on requests per day (RPD): org_x"},
-            "HTTP 429 rate_limit_exceeded RPD",
-            True,
-        ),
-    ],
-)
-async def test_groq_errors_keep_the_code_and_limit_but_not_the_message(
-    status: int, error: dict[str, str], reason: str, *, daily: bool
-) -> None:
-    answer = httpx.Response(status, json={"error": error})
-    groq = Groq(_recording([], answer), "k", "openai/gpt-oss-120b")
-
-    with pytest.raises(ProviderError) as raised:
-        await groq.complete("sys", "user", WIRE_SCHEMA, "x")
-
-    assert raised.value.reason == reason
-    assert raised.value.daily is daily
 
 
 def _ruling(topic: str, quote: str | None) -> Ruling:

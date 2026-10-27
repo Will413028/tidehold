@@ -14,10 +14,8 @@ from tidehold.policy.prompt import PROMPT_HASH
 from tidehold.policy.providers import (
     BENCHMARKED,
     CLAUDE_MAX_TOKENS,
-    MAX_OUTPUT_TOKENS,
     VENDORS,
     Claude,
-    Groq,
     build,
 )
 from tidehold.policy.schema import WIRE_SCHEMA
@@ -27,18 +25,8 @@ BENCHMARK = (
     / "docs/plans/2026-10-19-tidehold-hackathon/model-benchmark.md"
 )
 # Per vendor: a successful reply, where its request body carries the output-token cap, and
-# the cap (Claude's is higher: its adaptive thinking spends output tokens).
+# the cap.
 REPLIES: dict[str, tuple[dict[str, Any], tuple[str, ...], int]] = {
-    "groq": (
-        {"choices": [{"message": {"content": "{}"}, "finish_reason": "stop"}]},
-        ("max_completion_tokens",),
-        MAX_OUTPUT_TOKENS,
-    ),
-    "gemini": (
-        {"candidates": [{"content": {"parts": [{"text": "{}"}]}, "finishReason": "STOP"}]},
-        ("generationConfig", "maxOutputTokens"),
-        MAX_OUTPUT_TOKENS,
-    ),
     "anthropic": (
         {
             "id": "msg_1",
@@ -87,20 +75,14 @@ def test_the_configured_model_and_prompt_are_the_last_benchmarked() -> None:
 
 async def test_only_a_benchmarked_model_id_is_built() -> None:
     with pytest.raises(ValueError, match="not one the benchmark measured"):
-        build("groq:openai/gpt-oss", ModelKeys(groq="k"))
+        build("groq:openai/gpt-oss-120b", ModelKeys(anthropic="k"))
     # A Claude model runs in the product only once the benchmark has measured it (D22).
     with pytest.raises(ValueError, match="not one the benchmark measured"):
         build("anthropic:claude-opus-5-5", ModelKeys(anthropic="k"))
-    assert build(DEFAULT_COMPILE_MODEL, ModelKeys(groq="k")) is None
+    assert build(DEFAULT_COMPILE_MODEL, ModelKeys()) is None
 
     provider = build(DEFAULT_COMPILE_MODEL, ModelKeys(anthropic="k", anthropic_workspace="w"))
 
     assert isinstance(provider, Claude)
     assert (provider.model, provider.workspace) == ("claude-sonnet-5-5", "w")
     await provider.client.aclose()
-
-    fallback = build("groq:openai/gpt-oss-120b", ModelKeys(groq="k"))
-
-    assert isinstance(fallback, Groq)
-    assert fallback.model == "openai/gpt-oss-120b"
-    await fallback.client.aclose()

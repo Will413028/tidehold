@@ -28,7 +28,7 @@ TIDEHOLD_SECRETS_DIR=/home/ubuntu/.secrets/tidehold
 SHARED_SECRETS_DIR=/home/ubuntu/.secrets/dive-deposits-demo
 ```
 
-`SHARED_SECRETS_DIR` is the fallback's directory (D13): `paypal.env` and `models.env` are used by path, unchanged. `TIDEHOLD_SECRETS_DIR` (`chmod 700`) holds `db_password` (random; mode 644 so the non-root containers can read it, the directory keeps other host users out) and, optionally, `anthropic.env` (`ANTHROPIC_API_KEY`; without it the operator writes rules by hand). Nobody prints or reads these files; they are created by the developer.
+`SHARED_SECRETS_DIR` is the fallback's directory (D13): `paypal.env` is used by path, unchanged. `TIDEHOLD_SECRETS_DIR` (`chmod 700`) holds `db_password` (random; mode 644 so the non-root containers can read it, the directory keeps other host users out) and, optionally, `anthropic.env` (`ANTHROPIC_API_KEY`; without it the operator writes rules by hand). Nobody prints or reads these files; they are created by the developer.
 
 ## Build and load
 

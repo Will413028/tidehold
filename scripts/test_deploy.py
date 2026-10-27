@@ -16,7 +16,6 @@ DEPLOY = Path(__file__).resolve().parent.parent / "deploy"
 # file; none holds a real value.
 ENV_FILES = {
     "shared/paypal.env": "PAYPAL_CLIENT_ID",
-    "shared/models.env": "GROQ_API_KEY",
     "tidehold/anthropic.env": "ANTHROPIC_API_KEY",
 }
 
