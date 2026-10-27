@@ -70,6 +70,12 @@ Each against `tests/unit/test_anthropic.py` and `tests/unit/test_model_choice.py
 
 The Claude benchmark has not run (the developer's key, a human step).
 
+## Step 11: one model provider
+
+### Live compile on the deployed demo (2026-10-27 18:45 UTC, revision `2676ce5`)
+
+`2676ce5` (Groq and Gemini removed, Claude the only provider) shipped through `TIDEHOLD_NEXT_REVISION=2676ce5 ./nightly.sh` on oci-a1 (audit 0 rows, not failed, exit 0). Through the public URL (`tidehold.tail357fef.ts.net` mapped to its public address 103.84.155.217, since this Mac's MagicDNS does not resolve the Funnel name), a new workspace (201) sent `POST /api/policy-compilations` with synthetic wording of four sentences: a weather cancellation under a PAGASA tropical cyclone wind signal refunded in full for that day, a guest cancellation more than 30 days out refunded less a 3% fee, no refund within 30 days, and a change of dive site at the dive leader's discretion. Answer: 201 in 5.8 s, `mode` `live`, model `claude-sonnet-5-5`, prompt hash `00bdb5c3b65fa352`, one rule (per day, cause weather, with the PAGASA warning condition, its quote verbatim from the wording) and no needs-ruling items; the guest-cancellation and dive-site sentences produced no rule (the compiler's scope is weather cancellations).
+
 ## Step 7: official warnings and corroboration
 
 ### Recorded feeds read into the evidence store (2026-10-19 14:00 UTC)
