@@ -45,7 +45,7 @@ integration:
 	mkdir -p $(REPORTS)
 	cd backend && uv run --frozen pytest -q tests/integration --junitxml=$(REPORTS)/backend-integration.xml
 
-# The demo path in Chromium on desktop and mobile widths (Playwright): builds the web app and
+# The demo path in Chromium at desktop width (Playwright): builds the web app and
 # starts backend/tests/e2e/server.py (fakes for PayPal, the model and Open-Meteo, a throwaway
 # PostgreSQL 18; needs Docker). The browser comes from Playwright's CDN, pinned by its version.
 e2e:

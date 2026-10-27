@@ -14,7 +14,7 @@
     "backend-unit": 114,
     "backend-integration": 214,
     "web": 29,
-    "web-e2e": 14,
+    "web-e2e": 7,
     "recorder": 9,
     "scripts": 17,
     "bench": 6

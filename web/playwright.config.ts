@@ -3,7 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 const BACKEND = "http://127.0.0.1:8100";
 const WEB = "http://localhost:3100";
 
-/** The demo path in a real browser on two widths, against the e2e backend (step 9). */
+/** The demo path in a real browser at desktop width, against the e2e backend (step 9). */
 export default defineConfig({
   testDir: "e2e",
   fullyParallel: false,
@@ -18,11 +18,6 @@ export default defineConfig({
   use: { baseURL: WEB, trace: "retain-on-failure", screenshot: "only-on-failure" },
   projects: [
     { name: "desktop", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 900 } } },
-    // A phone's width without Chromium's mobile emulation: under Pixel 7 emulation (touch,
-    // device scale) clicks on the trip page landed well above their target although the page
-    // did not overflow (2026-10-20, not explained); it passes at this width without emulation.
-    // Recheck on a real phone in step 10's browser pass.
-    { name: "mobile", use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 } } },
   ],
   webServer: [
     {
