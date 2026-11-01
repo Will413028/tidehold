@@ -2,13 +2,13 @@ name: Security
 
 # The same checks as Will413028/fullstack-template, called at a pinned commit so a fix there reaches this repository
 # through one pin update: actionlint + zizmor, gitleaks over the whole history, and osv-scanner over the lockfiles
-# named here. The weekly run rescans main, since malicious-package records often appear after a version is already
+# named here. The weekly run rescans the default branch (dev, which contains all of main), since malicious-package records often appear after a version is already
 # in a lockfile; scheduled runs get only the vulnerability scan.
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   schedule:
     - cron: "17 3 * * 1"
   workflow_dispatch:
