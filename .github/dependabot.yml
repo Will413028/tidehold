@@ -3,6 +3,7 @@ version: 2
 # Wait a week before proposing a release, so a compromised version has time to be yanked.
 updates:
   - package-ecosystem: github-actions
+    target-branch: dev
     directory: /
     schedule:
       interval: weekly
@@ -13,6 +14,7 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: uv
+    target-branch: dev
     directory: /backend
     schedule:
       interval: weekly
@@ -23,6 +25,7 @@ updates:
         update-types: [minor, patch]
 
   - package-ecosystem: npm
+    target-branch: dev
     directory: /web
     schedule:
       interval: weekly
@@ -34,6 +37,7 @@ updates:
 
   # The deploy images (plan step 10a), pinned by digest in deploy/*.Dockerfile and compose.yaml.
   - package-ecosystem: docker
+    target-branch: dev
     directory: /deploy
     schedule:
       interval: weekly
@@ -44,6 +48,7 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: docker-compose
+    target-branch: dev
     directory: /deploy
     schedule:
       interval: weekly
