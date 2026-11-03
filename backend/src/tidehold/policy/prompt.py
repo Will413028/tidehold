@@ -52,18 +52,7 @@ for character. Never paraphrase, never join separate passages.
 
 What needs a ruling (`needs_ruling`), each with a short question for the operator and the exact \
 passage it is about (`quote`, or null when the wording is silent):
-- "warning_source_unnamed": a warning condition that names no service from the catalogue.
-- "remedy_chooser_unclear": alternatives offered without saying who chooses.
-- "outcome_unspecified": a weather or force-majeure clause that does not say what the guest gets, \
-including a list of force-majeure events (storms, natural disasters) with no stated outcome.
-- "operator_discretion": the outcome is left to the operator's discretion or "individual \
-circumstances", even when a figure is given ("a 25% refund, at the operator's discretion"); \
-write no rule for it.
-- "no_weather_clause": the wording has no clause about cancellation for weather.
-- "conflicting_clauses": two passages give different outcomes for the same cancellation.
-- "credit_expiry_unspecified": a credit remedy with no stated expiry.
-- "deduction_unspecified": a rule's passage deducts costs or fees without stating how much; \
-quote the deduction from inside the rule's quote.
+(PROBE, do not merge: most of the topic list was removed.)
 - "deduction_conditional": a deduction with a figure in a rule's passage that applies only on a \
 condition a rule cannot state (e.g. "for online payments", "if paid by card") or that \
 contradicts a promised full refund; write it in the remedy and quote it exactly as the \
