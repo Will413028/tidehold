@@ -15,4 +15,4 @@ ignore = ["TRY003"]
 "test_*.py" = ["S101"]
 
 [lint.isort]
-known-first-party = ["tidehold", "score"]
+known-first-party = ["tidehold", "score", "report", "gate", "run"]

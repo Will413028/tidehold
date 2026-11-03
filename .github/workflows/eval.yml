@@ -1,0 +1,64 @@
+name: Eval
+
+# The compile benchmark (bench/) against the model the product runs, on every change that can
+# move its scores: the prompt, the schemas, the compile path, the default model or the labels.
+# Dev split only, two runs; bench/gate.py fails the job below its floors. Not part of the
+# `gate (ci)` check on main: a live model call can fail for reasons outside the change.
+on:
+  push:
+    branches: [dev]
+    paths:
+      - backend/src/tidehold/policy/**
+      - backend/src/tidehold/platform/settings.py
+      - bench/**
+      - .github/workflows/eval.yml
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - backend/src/tidehold/policy/**
+      - backend/src/tidehold/platform/settings.py
+      - bench/**
+      - .github/workflows/eval.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    name: compile benchmark (dev)
+    # Dependabot and fork pull requests get no secrets; their changes are rerun on dev.
+    if: github.actor != 'dependabot[bot]' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.12.23"
+          enable-cache: false
+      - run: uv sync --project backend --frozen
+      - name: Run the benchmark on the product's default model
+        working-directory: backend
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          model=$(uv run --frozen python -c 'from tidehold.platform.settings import DEFAULT_COMPILE_MODEL; print(DEFAULT_COMPILE_MODEL)')
+          uv run --frozen python ../bench/run.py --models "$model" --split dev --runs 2 --out "$RUNNER_TEMP/results.json"
+      - name: Gate on the floors
+        working-directory: backend
+        run: |
+          set -o pipefail
+          uv run --frozen python ../bench/gate.py "$RUNNER_TEMP/results.json" | tee -a "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: eval-results
+          path: ${{ runner.temp }}/results.json
+          if-no-files-found: ignore
