@@ -14,7 +14,7 @@ Needs Python 3.13 with [uv](https://docs.astral.sh/uv/), Node 22+ with pnpm, Doc
 
 ```sh
 uv sync --project backend && pnpm --dir web install && lefthook install
-make check          # lint, typecheck, layer checks, unit and integration tests
+make check          # lint, typecheck, layer checks, unit tests (no containers; CI adds integration and e2e)
 make dev-db         # PostgreSQL 18 on 127.0.0.1:5433
 make dev-backend    # migrate, then the API on :8000
 make dev-web        # Next.js on :3000, proxying /api to the backend
