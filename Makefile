@@ -35,7 +35,7 @@ arch:
 
 unit:
 	mkdir -p $(REPORTS)
-	cd backend && uv run --frozen pytest -q tests/unit --junitxml=$(REPORTS)/backend-unit.xml
+	cd backend && uv run --frozen pytest -q tests/unit --ignore=tests/integration --ignore=tests/e2e --junitxml=$(REPORTS)/backend-unit.xml
 	cd backend && uv run --frozen pytest -q ../bench --junitxml=$(REPORTS)/bench.xml
 	$(WEB) test --reporter=default --reporter=junit --outputFile.junit=$(REPORTS)/web.xml
 	cd recorder && $(call UNITTEST,test_recorder,recorder)

@@ -1,5 +1,5 @@
 # Pushes go to dev, and pre-push is where a change is stopped first; CI is the backup, and
-# the only place the browser tests (`make e2e`) run.
+# the only place the container and browser suites (`make integration`, `make e2e`) run.
 # Install once per clone: `lefthook install` (with a global core.hooksPath that dispatches to
 # .git/hooks: `GIT_CONFIG_GLOBAL=/dev/null lefthook install`).
 pre-push:
