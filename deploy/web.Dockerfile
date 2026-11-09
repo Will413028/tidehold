@@ -1,7 +1,7 @@
 # tidehold web image (Next production server, plan step 10a). Build from the repository root:
 #   docker build -f deploy/web.Dockerfile -t tidehold-web:$(git rev-parse --short HEAD) .
 # Node 24.21.0, the major CI runs.
-FROM node:24.21.0-trixie-slim@sha256:173f125896c3b47ddf056734c7ea789d04595a6a08769a8f78e0df642781fb66
+FROM node:26.12.1-trixie-slim@sha256:94816674c62774da0d099a947bf4613b9e1972a2733abd0d0cd80e795f8411d0
 ENV NEXT_TELEMETRY_DISABLED=1
 WORKDIR /app
 # corepack (bundled with Node 24) installs the pnpm that package.json's packageManager names.

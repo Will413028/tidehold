@@ -2,7 +2,7 @@
 # repository root:
 #   docker build -f deploy/backend.Dockerfile -t tidehold-backend:$(git rev-parse --short HEAD) .
 # uv 0.12.23 with Python 3.13, the uv CI pins.
-FROM ghcr.io/astral-sh/uv:0.12.23-python3.13-trixie-slim@sha256:a6aeb5c166af9f765f9c68e585b5a5148c28f3b8a362f90151cecea88b21a3e2
+FROM ghcr.io/astral-sh/uv:0.13.7-python3.13-trixie-slim@sha256:6ff812e34a0e14b4b8bc9ddf25e77b3e16bac6e0c4d9b67641f40366fa382d4c
 ENV UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_COMPILE_BYTECODE=1 PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 COPY backend/pyproject.toml backend/uv.lock ./
